@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:roboparts-auth-tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/test-schema.sql
+app:
+  auth:
+    rate-limit:
+      requests: 1000
+      window-seconds: 60
+      capacity: 4096
+  registration:
+    access-code: Test-only-invitation-code-2026-10
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173

@@ -32,7 +32,7 @@ export function AppLayout() {
       : location.pathname === "/"
         ? "Visão geral"
         : location.pathname.startsWith("/robos") ? "Robôs e componentes"
-        : location.pathname.startsWith("/checklists") ? "Checklists de retirada"
+        : location.pathname.startsWith("/checklists") ? "Retiradas e devoluções"
         : location.pathname === "/historico" ? "Histórico da equipe"
         : "Página não encontrada";
 
@@ -102,7 +102,7 @@ export function AppLayout() {
               />
             </NavLink>
             <NavLink to="/robos" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><Bot size={19}/><span>Robôs e componentes</span></NavLink>
-            <NavLink to="/checklists" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><ClipboardCheck size={19}/><span>Checklists de retirada</span></NavLink>
+            <NavLink to="/checklists" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><ClipboardCheck size={19}/><span>Retiradas e devoluções</span></NavLink>
             <NavLink to="/historico" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><History size={19}/><span>Histórico da equipe</span></NavLink>
           </nav>
         </div>

@@ -1,6 +1,6 @@
 # RoboParts
 
-Sistema interno para controlar a retirada de robôs e seus componentes. As funcionalidades das seis etapas estão implementadas: autenticação restrita, robôs e árvore de componentes editável, checklists com snapshot, retiradas e devoluções, histórico, dashboard, interface responsiva, temas e preparação para PWA. A conexão com o PostgreSQL existente foi confirmada; a conclusão das migrações e a execução integrada ainda precisam ser verificadas. Os resultados de validação abaixo distinguem os testes locais da integração real.
+Sistema interno para controlar a retirada de robôs e seus componentes. As funcionalidades das seis etapas estão implementadas: autenticação restrita, robôs e lista de componentes editável, checklists com snapshot, retiradas e devoluções, histórico, dashboard, interface responsiva, temas e preparação para PWA. A conexão com o PostgreSQL existente e as três migrações foram confirmadas. Os resultados de validação abaixo distinguem os testes locais das verificações no ambiente real.
 
 ## Estrutura
 
@@ -90,7 +90,7 @@ Ao iniciar o backend, uma segunda inspeção acontece **antes de qualquer migra�
 
 Na primeira execução, o Flyway cria o schema da aplicação dentro do banco existente. A estratégia chama `migrate()` com [`validate-on-migrate=true`](https://documentation.red-gate.com/flyway/reference/configuration/flyway-namespace/flyway-validate-on-migrate-setting), que mantém a validação do histórico e aceita migrações pendentes. Uma chamada isolada a `validate()` antes disso falhava quando o schema ainda não existia.
 
-A migração V1 cria a tabela `roboparts.application_metadata`; a V2 acrescenta funcionários e auditoria de autenticação; a V3 acrescenta robôs, elementos da árvore, checklists, itens de snapshot e movimentações, além dos detalhes da auditoria. V1 e V2 permanecem intactas. A V3 não remove dados existentes. O Flyway gerencia seu histórico no mesmo schema; o Hibernate apenas valida a estrutura.
+A migração V1 cria a tabela `roboparts.application_metadata`; a V2 acrescenta funcionários e auditoria de autenticação; a V3 acrescenta robôs, componentes, checklists, itens de snapshot e movimentações, além dos detalhes da auditoria. V1 e V2 permanecem intactas. A V3 não remove dados existentes. O Flyway gerencia seu histórico no mesmo schema; o Hibernate apenas valida a estrutura.
 
 ## Código interno e autenticação
 
@@ -166,21 +166,23 @@ Sem sessão válida, as rotas privadas retornam 401. Todos os funcionários aute
 
 ## Robôs, checklists e histórico
 
-Abra **Robôs e componentes** para cadastrar um robô. Na estrutura, adicione categorias, subcategorias e componentes. Clique em qualquer nome para edição inline: Enter salva e Escape cancela. Em **Editar detalhes**, altere descrição, quantidade, obrigatoriedade, categoria e posição. Categorias só podem conter elementos do mesmo robô; ciclos são rejeitados. Arquivar uma categoria arquiva seus descendentes. Para restaurar um elemento sob uma categoria arquivada, restaure primeiro os ancestrais.
+Abra **Robôs e componentes** para cadastrar um robô. Use **Adicionar componente** para incluir as peças diretamente na lista do robô. Clique no nome para renomear: Enter salva e Escape cancela. Nos detalhes do componente, altere descrição, quantidade, obrigatoriedade e posição na lista. **Mostrar arquivados** permite restaurar componentes individualmente. Os componentes de estruturas antigas aparecem na mesma lista, mantendo seus dados e estados de arquivamento.
 
-Clique em **Iniciar retirada** para criar um checklist independente. Ele copia os nomes, descrições, quantidades, ordem e hierarquia atuais; mudanças posteriores na estrutura não alteram essa cópia. Marque o componente para retirar a quantidade completa, ou informe uma quantidade parcial e use **Registrar**. Desmarcar ou reduzir a quantidade registra uma devolução.
+Um robô em uso não pode ser arquivado: enquanto houver qualquer quantidade retirada em qualquer checklist, a tentativa é recusada com uma mensagem orientando a devolução completa. A conferência finalizada e a devolução parcial continuam contando como uso. Após devolver todos os componentes, o arquivamento fica disponível. A regra vale para todos os funcionários e o backend também impede que uma retirada e um arquivamento simultâneos deixem um robô arquivado em uso.
 
-**Finalizar conferência** exige todos os componentes obrigatórios retirados e ao menos uma retirada registrada. Depois da finalização, apenas devoluções são permitidas. Um checklist vazio ainda não finalizado pode ser cancelado sem apagar seu histórico. Consulte retiradas anteriores em **Checklists de retirada** e alterações em **Histórico da equipe**.
+Clique em **Iniciar retirada** para criar um checklist independente. Ele copia os nomes, descrições, quantidades e ordem atuais; mudanças posteriores na estrutura não alteram essa cópia. Marque o componente para retirar a quantidade completa, ou informe uma quantidade parcial e use **Registrar**. Desmarcar ou reduzir a quantidade registra uma devolução.
+
+**Confirmar retirada**, seguido de **Confirmar**, exige todos os componentes obrigatórios retirados e ao menos uma retirada registrada. O status exibido passa a **Em uso** e a tela muda automaticamente para **Checklist de devolução**. Marcar uma peça devolve todas as unidades restantes; para uma devolução parcial, informe a quantidade que está devolvendo e clique em **Devolver**. O progresso considera todas as peças retiradas, incluindo as opcionais. Após devolver tudo, o status passa a **Devolvido**. Um checklist vazio ainda não confirmado pode ser cancelado sem apagar seu histórico. Consulte retiradas anteriores em **Retiradas e devoluções** e alterações em **Histórico da equipe**. O código interno `COMPLETED` continua identificando a retirada confirmada para manter compatibilidade com os dados existentes.
 
 As escritas usam transações, bloqueios por robô ou checklist e uma versão esperada. Se outro funcionário salvar antes, a API responde 409: atualize, confira e salve novamente. Criação de checklist e movimentações recebem um UUID de operação; repetir a mesma requisição não repete a retirada. A interface não repete POST automaticamente.
 
-As estruturas têm limite de 1000 elementos por robô e 32 níveis; quantidades variam de 1 a 1.000.000. As listas e o histórico têm paginação. Busca e filtro de status na interface se aplicam à página exibida.
+Cada robô aceita até 1000 componentes; quantidades variam de 1 a 1.000.000. As listas e o histórico têm paginação. Busca e filtro de status na interface se aplicam à página exibida.
 
 | Método e rota | Operação |
 | --- | --- |
 | `GET/POST /api/robots` | Listar / cadastrar robôs |
 | `GET/POST /api/robots/{id}` | Consultar / atualizar robô |
-| `POST /api/robots/{id}/nodes` | Criar categoria ou componente |
+| `POST /api/robots/{id}/nodes` | Criar componente diretamente no robô |
 | `POST /api/robots/{id}/nodes/{nodeId}` | Renomear, editar, mover, reordenar ou arquivar elemento |
 | `POST /api/robots/{id}/checklists` | Criar snapshot e iniciar retirada |
 | `GET /api/checklists?robotId=...&page=0&limit=20` | Consultar retiradas anteriores |
@@ -226,13 +228,13 @@ Esse script habilita temporariamente `ROBOPARTS_POSTGRES_IT=true` e executa `mvn
 
 | Verificação | Resultado |
 | --- | --- |
-| Backend: `mvnw.cmd -B -ntp verify` | 79 testes aprovados; build e JAR executável gerados |
+| Backend: `mvnw.cmd -B -ntp verify` | 86 testes aprovados; build e JAR executável gerados; arquivamento durante uso, concorrência e compatibilidade com componentes/checklists antigos cobertos |
 | Inicialização com schema ausente e migrações pendentes | Regressão coberta com Flyway real em H2; criação inicial, atualização e rejeição de checksum alterado verificadas |
 | Inicialização do backend sem `DB_PASSWORD` | Proteção confirmada: saída 1 antes de migrar; nenhuma migração executada |
 | `Test-Database.ps1` sem senha disponível | Saída 2 confirmada; nenhuma conexão ou alteração realizada |
 | Frontend: build de produção | TypeScript e Vite aprovados; arquivos gerados em `frontend/dist` |
 | Auditoria de dependências de produção do frontend | Zero vulnerabilidades reportadas |
-| Frontend: `npm.cmd test` | 64 testes aprovados em 6 arquivos; cache PWA e estados dos botões do checklist incluídos |
+| Frontend: `npm.cmd test` | 71 testes aprovados em 6 arquivos; cache PWA, estados dos botões, mensagem de robô em uso, listas sem agrupamento e fluxo de confirmação/devolução parcial e completa incluídos |
 | Porta local 5432 | Respondeu à verificação TCP |
 | Conexão JDBC e versão real do PostgreSQL | Confirmadas pelo log de inicialização: banco `roboparts`, PostgreSQL 18.6, zero objetos existentes e nenhum histórico Flyway |
 | Migrações V1/V2/V3 no PostgreSQL | Confirmadas pelo log local: três migrações aplicadas, schema na versão 3 e backend iniciado |

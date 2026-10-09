@@ -5,34 +5,40 @@ Todas as telas de trabalho exigem uma conta de funcionário. O cadastro exige o 
 ## Preparar uma retirada
 
 1. Em **Robôs e componentes**, cadastre o robô com nome e descrição.
-2. Abra sua estrutura. Crie categorias, subcategorias e componentes. Categorias também podem ficar na raiz.
+2. Abra o robô e use **Adicionar componente** para cadastrar as peças diretamente na sua lista.
 3. Defina a quantidade necessária e se o componente é obrigatório. Componentes opcionais podem ser retirados, mas não impedem a finalização.
 4. Clique no nome para renomear: Enter ou **Salvar nome** confirma; Escape cancela. A edição só é confirmada após a API salvar.
-5. Em **Editar detalhes**, escolha uma categoria ativa do mesmo robô e a posição entre seus irmãos. Componentes não podem conter filhos. Ancestrais e descendentes não podem formar ciclos.
-6. Elementos arquivados não entram nos próximos checklists. Arquivar uma categoria arquiva seus descendentes. Mostrar arquivados permite restaurar primeiro os ancestrais e depois os elementos desejados.
+5. Abra os detalhes do componente para alterar nome, descrição, quantidade, obrigatoriedade e posição na lista.
+6. Componentes arquivados não entram nos próximos checklists. Use **Mostrar arquivados** para restaurá-los individualmente.
+
+O robô só pode ser arquivado quando não houver componentes retirados em nenhum dos seus checklists. Ao tentar arquivar um robô em uso, a tela informa que é necessário concluir a devolução de todos os componentes. Finalizar a conferência ou devolver apenas parte das peças mantém esse bloqueio. Alterações de nome e descrição continuam disponíveis durante o uso.
 
 Não há nomes fixos nem robôs de demonstração no banco de produção. Os nomes usados nos testes são apenas fixtures isoladas.
 
 ## Conferir e devolver
 
-**Iniciar retirada** cria um novo UUID de checklist. A estrutura inteira é copiada naquele momento: nome e descrição do robô, nomes e descrições de elementos, quantidades, obrigatoriedade, ordem e relações entre pais e filhos.
+**Iniciar retirada** cria um novo UUID de checklist. A lista de componentes ativos é copiada naquele momento: nome e descrição do robô, nomes e descrições dos componentes, quantidades, obrigatoriedade e ordem.
 
 O checkbox retira a quantidade completa do componente. Para uma retirada parcial, preencha a quantidade absoluta atualmente retirada e clique em **Registrar**. Exemplo: registrar 2 após uma quantidade 1 acrescenta uma retirada de 1; registrar 0 após 2 registra devolução de 2. O servidor calcula o delta e registra o funcionário e o horário.
 
-O progresso geral e por categoria considera os componentes obrigatórios totalmente retirados. Os filtros **Pendentes** e **Conferidos** ajudam na conferência. Categorias podem ser expandidas e recolhidas.
+Na retirada, o progresso considera os componentes obrigatórios totalmente retirados. Os filtros **Pendentes** e **Conferidos** ajudam na conferência. Todos os componentes aparecem em uma lista única.
+
+Clique em **Confirmar retirada** e depois em **Confirmar**. O status passa a **Em uso** e a tela abre automaticamente o **Checklist de devolução**. As caixas começam desmarcadas: marcar uma peça registra a devolução de todas as unidades restantes dela. Para devolver apenas parte, informe quantas unidades está devolvendo no campo de quantidade e clique em **Devolver**. Após cada devolução, o campo volta a zero e seu limite passa a ser a quantidade que ainda falta devolver.
+
+O progresso da devolução conta todas as peças que foram retiradas, incluindo as opcionais. Use **A devolver** e **Devolvidos** para filtrar. Peças opcionais que não foram retiradas não entram na devolução. Uma devolução parcial mantém o status **Em devolução**; devolver todas as peças encerra o uso com status **Devolvido**. Peças devolvidas ficam marcadas e não podem ser retiradas novamente neste checklist.
 
 | Estado | Significado |
 | --- | --- |
 | Pendente | Checklist criado, sem componentes retirados |
 | Em andamento | Há componentes retirados e a conferência ainda não foi finalizada |
-| Retirada conferida | Todos os obrigatórios foram conferidos e alguém confirmou a finalização |
+| Em uso | A retirada foi confirmada; o checklist de devolução está disponível |
 | Em devolução | A retirada foi finalizada e algumas quantidades foram devolvidas |
 | Devolvido | Todas as quantidades de uma retirada finalizada voltaram a zero |
 | Cancelado | Checklist sem finalização e sem quantidades retiradas foi cancelado |
 
-A finalização exige todos os componentes obrigatórios e ao menos uma retirada. Depois dela, a quantidade só pode diminuir; uma nova retirada exige outro checklist. O horário e o responsável pela finalização permanecem registrados mesmo após todas as devoluções.
+A confirmação exige todos os componentes obrigatórios e ao menos uma retirada. Depois dela, apenas devoluções são permitidas; uma nova retirada exige outro checklist. O horário e o responsável pela confirmação permanecem registrados mesmo após todas as devoluções.
 
-Renomear, mover, alterar quantidade ou arquivar a estrutura atual não modifica checklists anteriores. Cada checklist permanece independente. O sistema permite utilizações simultâneas registradas separadamente; ele não representa um estoque global nem permite deduzir disponibilidade física apenas da árvore.
+Renomear, reordenar, alterar quantidade ou arquivar a estrutura atual não modifica checklists anteriores. Cada checklist permanece independente. O sistema permite utilizações simultâneas registradas separadamente; ele não representa um estoque global nem permite deduzir disponibilidade física apenas da lista de componentes.
 
 ## Histórico e indicadores
 
@@ -56,7 +62,7 @@ Cada escrita de estrutura bloqueia o robô; cada movimentação ou encerramento 
 
 Criação de checklist e movimentação recebem um UUID de operação. Repetir a mesma solicitação retorna o resultado atual sem duplicar registros. Reutilizar o UUID com outro funcionário, item ou quantidade é rejeitado. A interface não repete POST automaticamente; quando permite tentar uma operação cuja resposta se perdeu, conserva seu identificador.
 
-Quantidades não podem ser negativas, fracionárias ou exceder o necessário. As estruturas têm no máximo 1000 elementos e 32 níveis. Relações entre robôs diferentes, pais que sejam componentes e ciclos são rejeitados.
+Quantidades não podem ser negativas, fracionárias ou exceder o necessário. Cada robô aceita até 1000 componentes, associados diretamente a ele. A API rejeita a criação de grupos e associações entre componentes.
 
 Identidades vêm da sessão no backend. Movimento, atualização e auditoria pertencem à mesma transação. Auditoria e movimentos são imutáveis pela API e por gatilhos PostgreSQL; os campos estruturais do snapshot também são protegidos. Alterações de quantidade retirada e responsável continuam disponíveis nos itens do checklist.
 
@@ -67,15 +73,13 @@ erDiagram
     USERS ||--o{ AUDIT_EVENTS : registra
     USERS ||--o{ CHECKLISTS : inicia
     ROBOTS ||--o{ COMPONENT_NODES : organiza
-    COMPONENT_NODES o|--o{ COMPONENT_NODES : contem
     ROBOTS ||--o{ CHECKLISTS : utiliza
     CHECKLISTS ||--o{ CHECKLIST_ITEMS : snapshot
-    CHECKLIST_ITEMS o|--o{ CHECKLIST_ITEMS : contem
     CHECKLIST_ITEMS ||--o{ MOVEMENTS : movimenta
     USERS ||--o{ MOVEMENTS : confere
 ```
 
-Os itens copiados preservam o UUID de origem para rastreabilidade, sem depender dos valores atuais da estrutura. O snapshot tem seus próprios IDs de pai e filho. Checklists e movimentos não são sobrescritos por novas utilizações.
+Os itens copiados preservam o UUID de origem para rastreabilidade, sem depender dos valores atuais da estrutura. Checklists e movimentos não são sobrescritos por novas utilizações. Estruturas antigas são apresentadas como listas de componentes; seus dados e registros históricos permanecem no banco. Novos checklists copiam apenas os componentes ativos, sem agrupamento.
 
 ## Verificação pendente no ambiente real
 

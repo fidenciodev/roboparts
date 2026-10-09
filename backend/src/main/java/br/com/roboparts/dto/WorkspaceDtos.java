@@ -7,10 +7,10 @@ public final class WorkspaceDtos {
  public record RobotInput(@NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description) {}
  public record RobotUpdate(@NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description,
    boolean archived,@NotNull @PositiveOrZero Long expectedVersion) {}
- public record NodeInput(@NotBlank @Pattern(regexp="CATEGORY|COMPONENT") String kind,
-   @NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description, UUID parentId,
+ public record NodeInput(@NotBlank @Pattern(regexp="COMPONENT") String kind,
+   @NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description, @Null UUID parentId,
    @Min(1) @Max(1000000) int quantity,boolean required,@NotNull @PositiveOrZero Long expectedVersion) {}
- public record NodeUpdate(@NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description,UUID parentId,
+ public record NodeUpdate(@NotBlank @Size(min=2,max=100) String name,@NotNull @Size(max=1000) String description,@Null UUID parentId,
    @Min(1) @Max(1000000) int quantity,boolean required,@Min(0) @Max(10000) int position,
    boolean archived,@NotNull @PositiveOrZero Long expectedVersion) {}
  public record VersionInput(@NotNull @PositiveOrZero Long expectedVersion) {}

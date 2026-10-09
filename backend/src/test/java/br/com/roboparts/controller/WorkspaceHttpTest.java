@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
@@ -37,17 +39,65 @@ class WorkspaceHttpTest extends BackendHttpTest {
  }
  ChecklistView start(RobotView r) { return workspace.start(r.id(),new StartInput(UUID.randomUUID(),r.version()),employee); }
  UUID component(ChecklistView c) { return c.items().stream().filter(i->i.kind().equals("COMPONENT")).findFirst().orElseThrow().id(); }
- @Test void snapshotAndLifecyclePreserveNamesQuantitiesHierarchyAndActors() {
-  RobotView r=robot();r=node(r,"CATEGORY","Sistema elétrico",null,1,true);
-  UUID parent=r.nodes().getFirst().id();r=node(r,"COMPONENT","Bateria original",parent,2,true);
+ @ParameterizedTest
+ @ValueSource(strings={"IN_PROGRESS","COMPLETED","RETURNING"})
+ void archiveRejectsAnyOutstandingWithdrawalAndSucceedsAfterCompleteReturn(String phase) throws Exception {
+  RobotView r=node(robot(),"COMPONENT","Peça em uso",null,2,true);
+  ChecklistView c=start(r);UUID item=component(c);
+  c=workspace.move(c.id(),item,new MovementInput(phase.equals("IN_PROGRESS")?1:2,UUID.randomUUID(),c.version()),employee);
+  if(!phase.equals("IN_PROGRESS"))c=workspace.finalizeChecklist(c.id(),new VersionInput(c.version()),employee);
+  if(phase.equals("RETURNING"))c=workspace.move(c.id(),item,new MovementInput(1,UUID.randomUUID(),c.version()),employee);
+  assertThat(c.status()).isEqualTo(phase);
+  var authenticated=UsernamePasswordAuthenticationToken.authenticated(employee,null,List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE")));
+  mvc.perform(post("/api/robots/"+r.id()).with(authentication(authenticated)).with(csrf())
+    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Nome não permitido\",\"description\":\"\",\"archived\":true,\"expectedVersion\":"+r.version()+"}"))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("robot_in_use"));
+  RobotView unchanged=workspace.robot(r.id());
+  assertThat(unchanged.archived()).isFalse();assertThat(unchanged.name()).isEqualTo(r.name());
+  assertThat(unchanged.version()).isEqualTo(r.version());
+  assertThat(workspace.history(employee.id(),0,100)).extracting(HistoryView::action).doesNotContain("ROBOT_UPDATED");
+  workspace.move(c.id(),item,new MovementInput(0,UUID.randomUUID(),c.version()),employee);
+  assertThat(workspace.updateRobot(r.id(),new RobotUpdate(r.name(),r.description(),true,r.version()),employee).archived()).isTrue();
+ }
+ @Test void archivingChecksAllRetirementsWhileAllowingOtherRobotEdits() {
+  RobotView r=node(robot(),"COMPONENT","Peça compartilhada",null,1,true);
+  ChecklistView first=start(r),second=start(r);
+  first=workspace.move(first.id(),component(first),new MovementInput(1,UUID.randomUUID(),first.version()),employee);
+  second=workspace.move(second.id(),component(second),new MovementInput(1,UUID.randomUUID(),second.version()),employee);
+  workspace.move(first.id(),component(first),new MovementInput(0,UUID.randomUUID(),first.version()),employee);
+  r=workspace.updateRobot(r.id(),new RobotUpdate("Nome permitido","Descrição permitida",false,r.version()),employee);
+  RobotView current=r;
+  assertThatThrownBy(()->workspace.updateRobot(current.id(),new RobotUpdate(current.name(),current.description(),true,current.version()),employee))
+    .isInstanceOfSatisfying(ApiRequestException.class,e->assertThat(e.getCode()).isEqualTo("robot_in_use"));
+  workspace.move(second.id(),component(second),new MovementInput(0,UUID.randomUUID(),second.version()),employee);
+  assertThat(workspace.updateRobot(r.id(),new RobotUpdate(r.name(),r.description(),true,r.version()),employee).archived()).isTrue();
+ }
+ @Test void concurrentArchivingAndWithdrawalCannotLeaveAnArchivedRobotInUse() throws Exception {
+  RobotView r=node(robot(),"COMPONENT","Peça simultânea",null,1,true);ChecklistView c=start(r);
+  CountDownLatch ready=new CountDownLatch(1);
+  try(var workers=Executors.newFixedThreadPool(2)) {
+   Future<Boolean> archive=workers.submit(()->{ready.await();try {
+    workspace.updateRobot(r.id(),new RobotUpdate(r.name(),r.description(),true,r.version()),employee);return true;
+   }catch(ApiRequestException e){assertThat(e.getCode()).isEqualTo("robot_in_use");return false;}});
+   Future<Boolean> withdraw=workers.submit(()->{ready.await();try {
+    workspace.move(c.id(),component(c),new MovementInput(1,UUID.randomUUID(),c.version()),employee);return true;
+   }catch(ApiRequestException e){assertThat(e.getCode()).isEqualTo("robot_archived");return false;}});
+   ready.countDown();
+   assertThat(archive.get(20,TimeUnit.SECONDS)).isNotEqualTo(withdraw.get(20,TimeUnit.SECONDS));
+   boolean archived=workspace.robot(r.id()).archived();
+   assertThat(workspace.checklist(c.id()).items().getFirst().takenQuantity()).isEqualTo(archived?0:1);
+  }
+ }
+ @Test void snapshotAndLifecyclePreserveNamesQuantitiesAndActors() {
+  RobotView r=node(robot(),"COMPONENT","Bateria original",null,2,true);
   ChecklistView c=start(r);UUID item=component(c);
   assertThat(c.total()).isEqualTo(1);assertThat(c.pending()).isEqualTo(1);
-  assertThat(c.items().stream().filter(i->i.kind().equals("COMPONENT")).findFirst().orElseThrow().parentId()).isNotNull();
+  assertThat(c.items().stream().filter(i->i.kind().equals("COMPONENT")).findFirst().orElseThrow().parentId()).isNull();
   var initial=c;
   assertThatThrownBy(()->workspace.finalizeChecklist(initial.id(),new VersionInput(initial.version()),employee))
     .isInstanceOf(ApiRequestException.class).hasMessageContaining("obrigatórios");
   NodeView old=r.nodes().stream().filter(n->n.kind().equals("COMPONENT")).findFirst().orElseThrow();
-  r=workspace.updateNode(r.id(),old.id(),update(old,parent,false,r.version(),"Bateria nova",3),employee);
+  r=workspace.updateNode(r.id(),old.id(),update(old,null,false,r.version(),"Bateria nova",3),employee);
   r=workspace.updateRobot(r.id(),new RobotUpdate("Robô renomeado","Nova descrição",false,r.version()),employee);
   ChecklistView saved=workspace.checklist(c.id());
   assertThat(saved.robotName()).isEqualTo("Robô teste");
@@ -71,38 +121,85 @@ class WorkspaceHttpTest extends BackendHttpTest {
   assertThat(workspace.history(employee.id(),0,100)).extracting(HistoryView::action)
     .contains("ROBOT_CREATED","NODE_UPDATED","CHECKLIST_STARTED","COMPONENT_WITHDRAWN","COMPONENT_RETURNED","CHECKLIST_FINALIZED");
  }
- @Test void rejectsCrossRobotParentsComponentsAsParentsAndCyclesWithoutChangingTheTree() {
-  RobotView r=robot();r=node(r,"CATEGORY","Categoria A",null,1,true);UUID a=r.nodes().getFirst().id();
-  r=node(r,"CATEGORY","Categoria B",a,1,true);NodeView b=r.nodes().stream().filter(n->n.name().equals("Categoria B")).findFirst().orElseThrow();
-  NodeView first=r.nodes().stream().filter(n->n.id().equals(a)).findFirst().orElseThrow();
-  RobotView current=r;
-  assertThatThrownBy(()->workspace.updateNode(current.id(),a,update(first,b.id(),false,current.version(),first.name(),1),employee))
-    .isInstanceOf(ApiRequestException.class);
+ @Test void rejectsCategoriesAndParentAssignmentsWithoutChangingComponents() throws Exception {
+  RobotView r=node(robot(),"COMPONENT","Componente raiz",null,1,true);
+  NodeView part=r.nodes().getFirst();
+  assertThatThrownBy(()->workspace.addNode(r.id(),new NodeInput("CATEGORY","Não permitido","",null,1,true,r.version()),employee)).isInstanceOf(ApiRequestException.class);
+  assertThatThrownBy(()->workspace.addNode(r.id(),new NodeInput("COMPONENT","Peça inválida","",part.id(),1,true,r.version()),employee)).isInstanceOf(ApiRequestException.class);
+  assertThatThrownBy(()->workspace.updateNode(r.id(),part.id(),update(part,part.id(),false,r.version(),part.name(),1),employee)).isInstanceOf(ApiRequestException.class);
+  var authenticated=UsernamePasswordAuthenticationToken.authenticated(employee,null,List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE")));
+  mvc.perform(post("/api/robots/"+r.id()+"/nodes").with(authentication(authenticated)).with(csrf())
+    .contentType(MediaType.APPLICATION_JSON).content("{\"kind\":\"CATEGORY\",\"name\":\"Não permitido\",\"description\":\"\",\"quantity\":1,\"required\":true,\"expectedVersion\":"+r.version()+"}"))
+    .andExpect(status().isBadRequest());
+  mvc.perform(post("/api/robots/"+r.id()+"/nodes").with(authentication(authenticated)).with(csrf())
+    .contentType(MediaType.APPLICATION_JSON).content("{\"kind\":\"COMPONENT\",\"parentId\":\""+part.id()+"\",\"name\":\"Não permitido\",\"description\":\"\",\"quantity\":1,\"required\":true,\"expectedVersion\":"+r.version()+"}"))
+    .andExpect(status().isBadRequest());
   assertThat(workspace.robot(r.id()).version()).isEqualTo(r.version());
-  RobotView other=node(robot(),"CATEGORY","Outra categoria",null,1,true);
-  UUID foreign=other.nodes().getFirst().id();
-  assertThatThrownBy(()->workspace.addNode(current.id(),new NodeInput("COMPONENT","Peça inválida","",foreign,1,true,current.version()),employee)).isInstanceOf(ApiRequestException.class);
-  r=node(r,"COMPONENT","Componente raiz",null,1,true);
-  UUID part=r.nodes().stream().filter(n->n.kind().equals("COMPONENT")).findFirst().orElseThrow().id();RobotView latest=r;
-  assertThatThrownBy(()->workspace.addNode(latest.id(),new NodeInput("CATEGORY","Não permitido","",part,1,true,latest.version()),employee)).isInstanceOf(ApiRequestException.class);
+  assertThat(workspace.robot(r.id()).nodes()).containsExactly(part);
  }
- @Test void movingAndReorderingNodesPersistsAnEditableTree() {
-  RobotView r=node(robot(),"CATEGORY","Primeira categoria",null,1,true);
-  UUID cat=r.nodes().getFirst().id();r=node(r,"COMPONENT","Peça um",null,1,true);r=node(r,"COMPONENT","Peça dois",null,4,false);
-  NodeView part=r.nodes().stream().filter(n->n.name().equals("Peça dois")).findFirst().orElseThrow();
-  r=workspace.updateNode(r.id(),part.id(),new NodeUpdate("Peça editada","Descrição editada",cat,5,true,0,false,r.version()),employee);
-  NodeView saved=workspace.robot(r.id()).nodes().stream().filter(n->n.id().equals(part.id())).findFirst().orElseThrow();
-  assertThat(saved.parentId()).isEqualTo(cat);assertThat(saved.quantity()).isEqualTo(5);assertThat(saved.description()).isEqualTo("Descrição editada");
+ @Test void reorderingComponentsPersistsOneFlatList() {
+  RobotView r=node(robot(),"COMPONENT","Peça um",null,1,true);r=node(r,"COMPONENT","Peça dois",null,4,false);
+  NodeView part=r.nodes().getLast();
+  r=workspace.updateNode(r.id(),part.id(),new NodeUpdate("Peça editada","Descrição editada",null,5,true,0,false,r.version()),employee);
+  assertThat(r.nodes()).extracting(NodeView::name).containsExactly("Peça editada","Peça um");
+  assertThat(r.nodes()).extracting(NodeView::position).containsExactly(0,1);
+  NodeView saved=r.nodes().getFirst();assertThat(saved.parentId()).isNull();assertThat(saved.quantity()).isEqualTo(5);
+  assertThat(saved.description()).isEqualTo("Descrição editada");
   assertThat(workspace.history(employee.id(),0,1).getFirst().details())
-    .contains("quantidade 4 → 5","categoria raiz → Primeira categoria","obrigatório false → true","descrição alterada");
+    .contains("quantidade 4 → 5","posição 2 → 1","obrigatório false → true","descrição alterada");
  }
- @Test void archivedSubtreesAreExcludedFromNewSnapshotsAndOldOnesRemain() {
-  RobotView r=node(robot(),"CATEGORY","Grupo arquivável",null,1,true);UUID cat=r.nodes().getFirst().id();
-  r=node(r,"COMPONENT","Peça antiga",cat,1,true);r=node(r,"COMPONENT","Peça ativa",null,1,true);
-  ChecklistView old=start(r);NodeView category=r.nodes().stream().filter(n->n.id().equals(cat)).findFirst().orElseThrow();
-  r=workspace.updateNode(r.id(),cat,update(category,null,true,r.version(),category.name(),1),employee);
+ @Test void archivedComponentsAreExcludedFromNewSnapshotsAndOldOnesRemain() {
+  RobotView r=node(robot(),"COMPONENT","Peça antiga",null,1,true);r=node(r,"COMPONENT","Peça ativa",null,1,true);
+  ChecklistView old=start(r);NodeView part=r.nodes().getFirst();
+  r=workspace.updateNode(r.id(),part.id(),update(part,null,true,r.version(),part.name(),1),employee);
   assertThat(start(r).items()).extracting(ItemView::name).containsExactly("Peça ativa");
-  assertThat(workspace.checklist(old.id()).items()).extracting(ItemView::name).contains("Peça antiga","Grupo arquivável");
+  assertThat(workspace.checklist(old.id()).items()).extracting(ItemView::name).containsExactly("Peça antiga","Peça ativa");
+ }
+ UUID legacyNode(RobotView r,String kind,String name,UUID parent,int position,boolean archived) {
+  UUID id=UUID.randomUUID();jdbc.update("INSERT INTO roboparts.component_nodes(id,robot_id,parent_id,kind,name,description,quantity,required,position,archived) VALUES (?,?,?,?,?,?,?,?,?,?)",
+   id,r.id(),parent,kind,name,"Descrição preservada",2,true,position,archived);return id;
+ }
+ @Test void legacyNestedComponentsKeepOrderDetailsAndArchivedStateInTheFlatList() {
+  RobotView r=robot();UUID group=legacyNode(r,"CATEGORY","Grupo antigo",null,0,false);
+  UUID first=legacyNode(r,"COMPONENT","Peça interna",group,0,false);
+  UUID nested=legacyNode(r,"CATEGORY","Subgrupo antigo",group,1,false);
+  legacyNode(r,"COMPONENT","Peça profunda",nested,0,false);
+  UUID archivedGroup=legacyNode(r,"CATEGORY","Grupo arquivado",null,1,true);
+  UUID archivedPart=legacyNode(r,"COMPONENT","Peça arquivada",archivedGroup,0,false);
+  legacyNode(r,"COMPONENT","Peça raiz",null,2,false);
+  RobotView flat=workspace.robot(r.id());
+  assertThat(flat.nodes()).extracting(NodeView::name).containsExactly("Peça interna","Peça profunda","Peça arquivada","Peça raiz");
+  assertThat(flat.nodes()).allSatisfy(n->{assertThat(n.kind()).isEqualTo("COMPONENT");assertThat(n.parentId()).isNull();assertThat(n.description()).isEqualTo("Descrição preservada");assertThat(n.quantity()).isEqualTo(2);});
+  assertThat(flat.nodes().get(2).archived()).isTrue();
+  ChecklistView started=start(flat);assertThat(started.items()).extracting(ItemView::name).containsExactly("Peça interna","Peça profunda","Peça raiz");
+  assertThat(started.items()).allSatisfy(i->assertThat(i.parentId()).isNull());
+  NodeView part=flat.nodes().getFirst();
+  RobotView edited=workspace.updateNode(r.id(),first,update(part,null,false,r.version(),"Peça atualizada",3),employee);
+  assertThat(edited.nodes()).extracting(NodeView::name).containsExactly("Peça atualizada","Peça profunda","Peça arquivada","Peça raiz");
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM roboparts.component_nodes WHERE robot_id=? AND kind='COMPONENT' AND parent_id IS NOT NULL",Integer.class,r.id())).isZero();
+  NodeView restore=edited.nodes().get(2);
+  RobotView restored=workspace.updateNode(r.id(),archivedPart,update(restore,null,false,edited.version(),restore.name(),2),employee);
+  assertThat(restored.nodes().get(2).archived()).isFalse();
+  assertThat(workspace.checklist(started.id()).items().getFirst().name()).isEqualTo("Peça interna");
+ }
+ @Test void legacyChecklistComponentsCanBeReturnedWithoutChangingTheirStoredSnapshot() {
+  RobotView r=robot();UUID group=legacyNode(r,"CATEGORY","Grupo anterior",null,0,false);
+  UUID source=legacyNode(r,"COMPONENT","Peça anterior",group,0,false);
+  UUID checkId=UUID.randomUUID(),groupItem=UUID.randomUUID(),partItem=UUID.randomUUID();
+  jdbc.update("INSERT INTO roboparts.checklists(id,robot_id,request_id,robot_name,robot_description,started_by,status,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+   checkId,r.id(),UUID.randomUUID(),r.name(),r.description(),employee.id(),"IN_PROGRESS",0,Instant.now(),Instant.now());
+  jdbc.update("INSERT INTO roboparts.checklist_items(id,checklist_id,source_node_id,parent_id,kind,name,description,quantity,required,position,taken_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+   groupItem,checkId,group,null,"CATEGORY","Grupo anterior","",1,true,0,0);
+  jdbc.update("INSERT INTO roboparts.checklist_items(id,checklist_id,source_node_id,parent_id,kind,name,description,quantity,required,position,taken_quantity,checked_by,checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   partItem,checkId,source,groupItem,"COMPONENT","Peça anterior","Snapshot preservado",2,true,0,1,employee.id(),Instant.now());
+  ChecklistView flat=workspace.checklist(checkId);assertThat(flat.items()).hasSize(1);
+  assertThat(flat.items().getFirst().parentId()).isNull();assertThat(flat.items().getFirst().takenQuantity()).isEqualTo(1);
+  assertThat(flat.items().getFirst().checkedByName()).isEqualTo(employee.name());
+  ChecklistView returned=workspace.move(checkId,partItem,new MovementInput(0,UUID.randomUUID(),flat.version()),employee);
+  assertThat(returned.items().getFirst().takenQuantity()).isZero();assertThat(returned.movements().getFirst().delta()).isEqualTo(-1);
+  assertThat(jdbc.queryForObject("SELECT parent_id FROM roboparts.checklist_items WHERE id=?",UUID.class,partItem)).isEqualTo(groupItem);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM roboparts.checklist_items WHERE checklist_id=?",Integer.class,checkId)).isEqualTo(2);
+  assertThat(jdbc.queryForObject("SELECT description FROM roboparts.checklist_items WHERE id=?",String.class,partItem)).isEqualTo("Snapshot preservado");
  }
  @Test void staleVersionsAndInvalidQuantitiesCannotOverwriteData() {
   RobotView r=node(robot(),"COMPONENT","Peça limitada",null,2,true);ChecklistView c=start(r);UUID item=component(c);

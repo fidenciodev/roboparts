@@ -43,9 +43,46 @@ public class WorkspaceService {
  private void event(SessionUser u,AuditAction action,String detail,String type,UUID id) {
   audit.save(new AuditEvent(u.id(),action,detail,type,id));
  }
+ // Read legacy nested data in its original order without modifying historical snapshots.
+ private static <T> List<T> flatComponents(List<T> rows,Function<T,UUID> id,Function<T,UUID> parent,Function<T,String> kind) {
+  Map<UUID,List<T>> children=new HashMap<>();
+  for(T row:rows)children.computeIfAbsent(parent.apply(row),key->new ArrayList<>()).add(row);
+  List<T> result=new ArrayList<>();Set<UUID> seen=new HashSet<>();
+  List<T> roots=new ArrayList<>(children.getOrDefault(null,List.of()));roots.addAll(rows);
+  for(T root:roots) {
+   Deque<T> pending=new ArrayDeque<>();pending.push(root);
+   while(!pending.isEmpty()) {
+    T row=pending.pop();if(!seen.add(id.apply(row)))continue;
+    if("COMPONENT".equals(kind.apply(row)))result.add(row);
+    List<T> descendants=children.getOrDefault(id.apply(row),List.of());
+    for(int i=descendants.size()-1;i>=0;i--)pending.push(descendants.get(i));
+   }
+  }
+  return result;
+ }
+ private static boolean archived(ComponentNode node,Map<UUID,ComponentNode> byId) {
+  Set<UUID> seen=new HashSet<>();
+  while(node!=null&&seen.add(node.id)) {if(node.archived)return true;node=byId.get(node.parentId);}
+  return false;
+ }
+ private List<ComponentNode> editableComponents(UUID robotId) {
+  List<ComponentNode> rows=nodes.findByRobotIdOrderByPositionAscIdAsc(robotId);
+  Map<UUID,ComponentNode> byId=rows.stream().collect(Collectors.toMap(n->n.id,Function.identity()));
+  List<ComponentNode> flat=flatComponents(rows,n->n.id,n->n.parentId,n->n.kind);
+  for(ComponentNode n:flat)n.archived=archived(n,byId);
+  for(int i=0;i<flat.size();i++){ComponentNode n=flat.get(i);n.parentId=null;n.position=i;}
+  return flat;
+ }
  private RobotView robotView(Robot r,boolean tree) {
+  List<NodeView> view=new ArrayList<>();
+  if(tree) {
+   List<ComponentNode> rows=nodes.findByRobotIdOrderByPositionAscIdAsc(r.id);
+   Map<UUID,ComponentNode> byId=rows.stream().collect(Collectors.toMap(n->n.id,Function.identity()));
+   for(ComponentNode n:flatComponents(rows,x->x.id,x->x.parentId,x->x.kind))
+    view.add(new NodeView(n.id,null,"COMPONENT",n.name,n.description,n.quantity,n.required,view.size(),archived(n,byId)));
+  }
   return new RobotView(r.id,r.name,r.description,r.archived,r.version,r.createdAt,
-    tree?nodes.findByRobotIdOrderByPositionAscIdAsc(r.id).stream().map(n->new NodeView(n.id,n.parentId,n.kind,n.name,n.description,n.quantity,n.required,n.position,n.archived)).toList():List.of());
+    view);
  }
  @Transactional(readOnly=true)
  public List<RobotView> robots(int page,int limit) { return robots.findAllByOrderByNameAscIdAsc(PageRequest.of(page,limit)).stream().map(r->robotView(r,false)).toList(); }
@@ -58,6 +95,10 @@ public class WorkspaceService {
  }
  public RobotView updateRobot(UUID id,RobotUpdate body,SessionUser u) {
   Robot r=lockedRobot(id);version(r.version,body.expectedVersion());
+  if(body.archived()&&Boolean.TRUE.equals(jdbc.queryForObject(
+    "SELECT EXISTS (SELECT 1 FROM roboparts.checklists c JOIN roboparts.checklist_items i ON i.checklist_id=c.id WHERE c.robot_id=? AND i.taken_quantity>0)",
+    Boolean.class,id)))
+   throw fail(HttpStatus.CONFLICT,"robot_in_use","Este robô está em uso e não pode ser arquivado. Conclua a devolução de todos os componentes antes de arquivar.");
   String previous=r.name;String previousDescription=r.description;boolean previousArchived=r.archived;
   r.name=name(body.name());r.description=body.description().trim();r.archived=body.archived();r.updatedAt=Instant.now();
   robots.flush();
@@ -66,63 +107,32 @@ public class WorkspaceService {
     (!previousDescription.equals(r.description)?"; descrição alterada":""),"ROBOT",id);
   return robotView(r,true);
  }
- private void parent(List<ComponentNode> all,UUID parentId,UUID movingId) {
-  if(parentId==null) return;
-  Map<UUID,ComponentNode> byId=all.stream().collect(Collectors.toMap(n->n.id,Function.identity()));
-  ComponentNode p=byId.get(parentId);
-  if(p==null || !"CATEGORY".equals(p.kind) || p.archived) throw fail(HttpStatus.BAD_REQUEST,"invalid_parent","Escolha uma categoria ativa do mesmo robô.");
-  Set<UUID> visited=new HashSet<>();
-  UUID cursor=parentId;
-  while(cursor!=null) {
-   if(Objects.equals(cursor,movingId) || !visited.add(cursor)) throw fail(HttpStatus.BAD_REQUEST,"invalid_hierarchy","Uma categoria não pode conter a si mesma ou um ancestral.");
-   if(visited.size()>32) throw fail(HttpStatus.BAD_REQUEST,"invalid_hierarchy","A estrutura permite até 32 níveis.");
-   ComponentNode ancestor=byId.get(cursor); if(ancestor==null) throw missing(); cursor=ancestor.parentId;
-  }
- }
  public RobotView addNode(UUID robotId,NodeInput body,SessionUser u) {
   Robot r=lockedRobot(robotId);version(r.version,body.expectedVersion());active(r);
-  List<ComponentNode> all=nodes.findByRobotIdOrderByPositionAscIdAsc(robotId);
-  if(all.size()>=1000) throw fail(HttpStatus.CONFLICT,"structure_limit","Este robô atingiu o limite de 1000 elementos.");
-  parent(all,body.parentId(),null);
-  ComponentNode n=new ComponentNode();n.id=UUID.randomUUID();n.robotId=robotId;n.parentId=body.parentId();
-  n.kind=body.kind();n.name=name(body.name());n.description=body.description().trim();n.quantity=body.quantity();n.required=body.required();
-  n.position=(int)all.stream().filter(x->Objects.equals(x.parentId,n.parentId)).count();
+  if(!"COMPONENT".equals(body.kind())||body.parentId()!=null)throw fail(HttpStatus.BAD_REQUEST,"validation_error","Cadastre o componente diretamente no robô.");
+  List<ComponentNode> all=editableComponents(robotId);
+  if(all.size()>=1000) throw fail(HttpStatus.CONFLICT,"structure_limit","Este robô atingiu o limite de 1000 componentes.");
+  ComponentNode n=new ComponentNode();n.id=UUID.randomUUID();n.robotId=robotId;n.parentId=null;
+  n.kind="COMPONENT";n.name=name(body.name());n.description=body.description().trim();n.quantity=body.quantity();n.required=body.required();
+  n.position=all.size();
   nodes.saveAndFlush(n);r.updatedAt=Instant.now();robots.flush();
   event(u,AuditAction.NODE_CREATED,"Adicionou "+n.name+" ao robô "+r.name,"ROBOT",r.id);
   return robotView(r,true);
  }
  public RobotView updateNode(UUID robotId,UUID nodeId,NodeUpdate body,SessionUser u) {
   Robot r=lockedRobot(robotId);version(r.version,body.expectedVersion());active(r);
-  List<ComponentNode> all=nodes.findByRobotIdOrderByPositionAscIdAsc(robotId);
+  if(body.parentId()!=null)throw fail(HttpStatus.BAD_REQUEST,"validation_error","O componente deve pertencer diretamente ao robô.");
+  List<ComponentNode> all=editableComponents(robotId);
   ComponentNode n=all.stream().filter(x->x.id.equals(nodeId)).findFirst().orElseThrow(WorkspaceService::missing);
-  parent(all,body.parentId(),nodeId);
-  // Include descendants when calculating the final depth, not just the destination.
-  Map<UUID,UUID> parents=all.stream().filter(x->x.parentId!=null).collect(Collectors.toMap(x->x.id,x->x.parentId));
-  if(body.parentId()==null) parents.remove(nodeId);else parents.put(nodeId,body.parentId());
-  for(ComponentNode x:all) {
-   Set<UUID> seen=new HashSet<>();UUID cursor=x.id;
-   while(cursor!=null) { if(!seen.add(cursor)||seen.size()>33) throw fail(HttpStatus.BAD_REQUEST,"invalid_hierarchy","A hierarquia é inválida ou excede 32 níveis.");cursor=parents.get(cursor); }
-  }
-  String previous=n.name;String previousDescription=n.description;UUID oldParent=n.parentId;
+  String previous=n.name;String previousDescription=n.description;
   int oldQuantity=n.quantity;int oldPosition=n.position;boolean oldRequired=n.required;boolean oldArchived=n.archived;
-  n.name=name(body.name());n.description=body.description().trim();n.quantity=body.quantity();n.required=body.required();n.parentId=body.parentId();n.archived=body.archived();
-  if(n.archived) {
-   Set<UUID> subtree=new HashSet<>(Set.of(n.id));boolean changed;
-   do { changed=false;for(ComponentNode x:all) if(x.parentId!=null&&subtree.contains(x.parentId)) changed|=subtree.add(x.id); } while(changed);
-   all.stream().filter(x->subtree.contains(x.id)).forEach(x->x.archived=true);
-  }
-  List<ComponentNode> siblings=new ArrayList<>(all.stream().filter(x->!x.id.equals(n.id)&&Objects.equals(x.parentId,n.parentId)).toList());
+  n.name=name(body.name());n.description=body.description().trim();n.quantity=body.quantity();n.required=body.required();n.archived=body.archived();
+  List<ComponentNode> siblings=new ArrayList<>(all.stream().filter(x->!x.id.equals(n.id)).toList());
   siblings.add(Math.min(body.position(),siblings.size()),n);
   for(int i=0;i<siblings.size();i++) siblings.get(i).position=i;
-  if(!Objects.equals(oldParent,n.parentId)) {
-   List<ComponentNode> old=all.stream().filter(x->Objects.equals(x.parentId,oldParent)).toList();
-   for(int i=0;i<old.size();i++)old.get(i).position=i;
-  }
   nodes.flush();r.updatedAt=Instant.now();robots.flush();
-  String previousParent=oldParent==null?"raiz":all.stream().filter(x->x.id.equals(oldParent)).findFirst().map(x->x.name).orElse("");
-  String currentParent=n.parentId==null?"raiz":all.stream().filter(x->x.id.equals(n.parentId)).findFirst().map(x->x.name).orElse("");
   event(u,AuditAction.NODE_UPDATED,"Alterou "+previous+" → "+n.name+"; quantidade "+oldQuantity+" → "+n.quantity+
-    "; categoria "+previousParent+" → "+currentParent+"; posição "+(oldPosition+1)+" → "+(n.position+1)+
+    "; posição "+(oldPosition+1)+" → "+(n.position+1)+
     "; obrigatório "+oldRequired+" → "+n.required+"; "+(oldArchived?"arquivado":"ativo")+" → "+(n.archived?"arquivado":"ativo")+
     (!previousDescription.equals(n.description)?"; descrição alterada":""),"ROBOT",r.id);
   return robotView(r,true);
@@ -135,21 +145,14 @@ public class WorkspaceService {
    return checklistView(repeated.get(),true);
   }
   version(r.version,body.expectedVersion());active(r);
-  List<ComponentNode> source=nodes.findByRobotIdOrderByPositionAscIdAsc(robotId).stream().filter(n->!n.archived).toList();
-  if(source.stream().noneMatch(n->n.kind.equals("COMPONENT"))) throw fail(HttpStatus.CONFLICT,"empty_structure","Adicione pelo menos um componente ativo antes de iniciar um checklist.");
+  List<NodeView> source=robotView(r,true).nodes().stream().filter(n->!n.archived()).toList();
+  if(source.isEmpty()) throw fail(HttpStatus.CONFLICT,"empty_structure","Adicione pelo menos um componente ativo antes de iniciar um checklist.");
   Checklist c=new Checklist();c.id=UUID.randomUUID();c.requestId=body.requestId();c.robotId=r.id;c.robotName=r.name;c.robotDescription=r.description;
   c.startedBy=u.id();c.status="PENDING";c.createdAt=c.updatedAt=Instant.now();checklists.saveAndFlush(c);
-  Map<UUID,UUID> ids=new HashMap<>();source.forEach(n->ids.put(n.id,UUID.randomUUID()));
-  // Persist parents first to satisfy the composite FK regardless of sibling ordering.
-  Set<UUID> saved=new HashSet<>();
-  while(saved.size()<source.size()) {
-   boolean progressed=false;
-   for(ComponentNode n:source) if(!saved.contains(n.id)&&(n.parentId==null||saved.contains(n.parentId))) {
-    ChecklistItem item=new ChecklistItem();item.id=ids.get(n.id);item.checklistId=c.id;item.sourceNodeId=n.id;item.parentId=ids.get(n.parentId);
-    item.kind=n.kind;item.name=n.name;item.description=n.description;item.quantity=n.quantity;item.required=n.required;item.position=n.position;
-    items.saveAndFlush(item);saved.add(n.id);progressed=true;
-   }
-   if(!progressed) throw fail(HttpStatus.CONFLICT,"invalid_hierarchy","A estrutura não pôde ser copiada.");
+  for(NodeView n:source) {
+   ChecklistItem item=new ChecklistItem();item.id=UUID.randomUUID();item.checklistId=c.id;item.sourceNodeId=n.id();item.parentId=null;
+   item.kind="COMPONENT";item.name=n.name();item.description=n.description();item.quantity=n.quantity();item.required=n.required();item.position=n.position();
+   items.saveAndFlush(item);
   }
   event(u,AuditAction.CHECKLIST_STARTED,"Iniciou uma retirada de "+r.name,"CHECKLIST",c.id);
   return checklistView(c,true);
@@ -164,9 +167,12 @@ public class WorkspaceService {
   int done=(int)components.stream().filter(i->i.takenQuantity==i.quantity).count();
   Map<UUID,String> names=new HashMap<>();
   Map<UUID,String> itemNames=list.stream().collect(Collectors.toMap(i->i.id,i->i.name));
+  List<ItemView> view=new ArrayList<>();
+  if(full)for(ChecklistItem i:flatComponents(list,x->x.id,x->x.parentId,x->x.kind))
+   view.add(new ItemView(i.id,null,"COMPONENT",i.name,i.description,i.quantity,i.required,view.size(),i.takenQuantity,userName(i.checkedBy,names),i.checkedAt));
   return new ChecklistView(c.id,c.robotId,c.robotName,c.robotDescription,c.status,c.version,c.startedBy,userName(c.startedBy,names),c.createdAt,c.finalizedAt,userName(c.finalizedBy,names),
     components.size(),done,components.size()-done,
-    full?list.stream().map(i->new ItemView(i.id,i.parentId,i.kind,i.name,i.description,i.quantity,i.required,i.position,i.takenQuantity,userName(i.checkedBy,names),i.checkedAt)).toList():List.of(),
+    view,
     full?movements.findByChecklistIdOrderByCreatedAtAscIdAsc(c.id).stream().map(m->new MovementView(m.id,m.itemId,itemNames.get(m.itemId),m.delta,m.resultingQuantity,userName(m.userId,names),m.createdAt)).toList():List.of());
  }
  @Transactional(readOnly=true)
@@ -177,6 +183,9 @@ public class WorkspaceService {
     checklists.findByRobotIdOrderByCreatedAtDescIdDesc(robotId,PageRequest.of(page,limit))).stream().map(c->checklistView(c,false)).toList();
  }
  public ChecklistView move(UUID checklistId,UUID itemId,MovementInput body,SessionUser u) {
+  // Serialize withdrawals and archival on the same robot, before locking a checklist.
+  UUID robotId=checklists.findRobotIdById(checklistId).orElseThrow(WorkspaceService::missing);
+  Robot robot=lockedRobot(robotId);
   Checklist c=checklists.lockById(checklistId).orElseThrow(WorkspaceService::missing);
   Optional<Movement> previous=movements.findByChecklistIdAndRequestId(checklistId,body.requestId());
   if(previous.isPresent()) {
@@ -193,6 +202,7 @@ public class WorkspaceService {
   if(c.finalizedAt!=null&&body.quantity()>item.takenQuantity) throw fail(HttpStatus.CONFLICT,"checklist_closed","Após finalizar, apenas devoluções são permitidas.");
   int delta=body.quantity()-item.takenQuantity;
   if(delta==0)return checklistView(c,true);
+  if(delta>0)active(robot);
   item.takenQuantity=body.quantity();item.checkedBy=u.id();item.checkedAt=Instant.now();items.flush();
   if(c.finalizedAt!=null)c.status=all.stream().allMatch(i->i.takenQuantity==0)?"RETURNED":"RETURNING";
   else c.status=all.stream().anyMatch(i->i.takenQuantity>0)?"IN_PROGRESS":"PENDING";

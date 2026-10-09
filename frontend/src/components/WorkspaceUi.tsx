@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Check, ChevronLeft, ChevronRight, LoaderCircle, Pencil, RefreshCw, X } from "lucide-react";
 export const formatDate = (value: string) => new Intl.DateTimeFormat("pt-BR",{dateStyle:"short",timeStyle:"short"}).format(new Date(value));
-export const statusLabels: Record<string,string> = { PENDING:"Pendente", IN_PROGRESS:"Em andamento", COMPLETED:"Retirada conferida", RETURNING:"Em devolução", RETURNED:"Devolvido", CANCELLED:"Cancelado" };
+export const statusLabels: Record<string,string> = { PENDING:"Pendente", IN_PROGRESS:"Em andamento", COMPLETED:"Em uso", RETURNING:"Em devolução", RETURNED:"Devolvido", CANCELLED:"Cancelado" };
 export const actionLabels: Record<string,string> = { USER_REGISTERED:"Cadastro de conta",USER_LOGGED_IN:"Entrada no sistema",USER_LOGGED_OUT:"Saída do sistema",
  ROBOT_CREATED:"Robô cadastrado",ROBOT_UPDATED:"Robô alterado",NODE_CREATED:"Elemento adicionado",NODE_UPDATED:"Elemento alterado",
  CHECKLIST_STARTED:"Retirada iniciada",COMPONENT_WITHDRAWN:"Componente retirado",COMPONENT_RETURNED:"Componente devolvido",CHECKLIST_FINALIZED:"Retirada conferida",CHECKLIST_CANCELLED:"Checklist cancelado" };

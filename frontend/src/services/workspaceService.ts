@@ -28,8 +28,8 @@ export const getRobots = (page: number,signal?: AbortSignal) => get("/api/robots
 export const getRobot = (id: string,signal?: AbortSignal) => get("/api/robots/"+id,robot,signal);
 export const createRobot = (name: string,description: string) => post("/api/robots",{name,description},robot);
 export const updateRobot = (r: Robot,changes: Partial<Pick<Robot,"name"|"description"|"archived">>) => post("/api/robots/"+r.id,{name:r.name,description:r.description,archived:r.archived,...changes,expectedVersion:r.version},robot);
-export const addNode = (r: Robot,draft: NodeDraft) => post("/api/robots/"+r.id+"/nodes",{...draft,expectedVersion:r.version},robot);
-export const updateNode = (r: Robot,n: TreeNode,changes: Partial<NodeDraft>) => post("/api/robots/"+r.id+"/nodes/"+n.id,{...n,...changes,expectedVersion:r.version},robot);
+export const addNode = (r: Robot,draft: NodeDraft) => post("/api/robots/"+r.id+"/nodes",{...draft,kind:"COMPONENT",parentId:null,expectedVersion:r.version},robot);
+export const updateNode = (r: Robot,n: TreeNode,changes: Partial<NodeDraft>) => post("/api/robots/"+r.id+"/nodes/"+n.id,{...n,...changes,parentId:null,expectedVersion:r.version},robot);
 export const startChecklist = (r: Robot,requestId: string) => post("/api/robots/"+r.id+"/checklists",{requestId,expectedVersion:r.version},checklist);
 export const getChecklists = (page: number,robotId: string,signal?: AbortSignal) => get("/api/checklists?page="+page+"&limit=20"+(robotId?"&robotId="+encodeURIComponent(robotId):""),list(checklist),signal);
 export const getChecklist = (id: string,signal?: AbortSignal) => get("/api/checklists/"+id,checklist,signal);

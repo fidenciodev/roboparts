@@ -16,4 +16,4 @@ export interface Checklist {
 }
 export interface HistoryEntry { id: string; userId: string; userName: string; action: string; details: string; resourceType: string | null; resourceId: string | null; createdAt: string }
 export interface Dashboard { robots: number; robotsInUse: number; inProgress: number; completed: number; pendingComponents: number; recent: HistoryEntry[] }
-export interface NodeDraft { kind: TreeNode["kind"]; name: string; description: string; parentId: string | null; quantity: number; required: boolean; position: number; archived: boolean }
+export interface NodeDraft { kind: "COMPONENT"; name: string; description: string; parentId: string | null; quantity: number; required: boolean; position: number; archived: boolean }

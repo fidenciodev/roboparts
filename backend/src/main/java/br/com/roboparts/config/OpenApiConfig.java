@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
 public class OpenApiConfig {
     @Bean
     OpenAPI roboPartsOpenApi() {
-        return new OpenAPI().info(new Info().title("RoboParts API").version("0.3.0")
+        return new OpenAPI().info(new Info().title("RoboParts API").version("0.5.0")
                 .description("Robôs, componentes, checklists com snapshot, movimentações, auditoria e autenticação por sessão. Antes de um POST, obtenha o token em "
                         + "/api/auth/csrf e envie o cabeçalho X-CSRF-TOKEN. Depois de login ou logout, renove o token."))
                 .components(new Components().addSecuritySchemes("employeeSession", new SecurityScheme()
@@ -27,7 +27,9 @@ public class OpenApiConfig {
         return api -> api.getPaths().forEach((path,item) -> item.readOperationsMap().forEach((method,operation) -> {
             if (!path.startsWith("/api/") || path.equals("/api/auth/csrf")) return;
             SecurityRequirement required = new SecurityRequirement();
-            if (!path.equals("/api/auth/login") && !path.equals("/api/auth/register")) required.addList("employeeSession");
+            if (!java.util.Set.of("/api/auth/login", "/api/auth/register", "/api/auth/verify-email",
+                    "/api/auth/resend-verification", "/api/auth/forgot-password",
+                    "/api/auth/reset-password", "/api/auth/mfa-login").contains(path)) required.addList("employeeSession");
             if (method == PathItem.HttpMethod.POST) required.addList("csrfToken");
             if (!required.isEmpty()) operation.addSecurityItem(required);
         }));

@@ -12,6 +12,7 @@ export interface AuthContextValue {
   sessionExpired: boolean;
   retrySession: () => void;
   login: (email: string, password: string) => Promise<void>;
+  loginMfa: (code: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -73,6 +74,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setStatus("anonymous");
   }, [queryClient]);
 
-  return <AuthContext.Provider value={{ user, status, error, sessionExpired, login, logout,
+  const loginMfa = useCallback(async (code: string) => {
+    const currentUser = await authService.loginMfa(code);
+    queryClient.clear(); setUser(currentUser); setError(null); setSessionExpired(false); setStatus("authenticated");
+  }, [queryClient]);
+
+  return <AuthContext.Provider value={{ user, status, error, sessionExpired, login, loginMfa, logout,
     retrySession: () => setSessionAttempt((attempt) => attempt + 1) }}>{children}</AuthContext.Provider>;
 }

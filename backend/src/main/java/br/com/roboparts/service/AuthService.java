@@ -3,6 +3,7 @@ package br.com.roboparts.service;
 import br.com.roboparts.dto.ActivityResponse;
 import br.com.roboparts.dto.RegisterRequest;
 import br.com.roboparts.dto.UserResponse;
+import br.com.roboparts.dto.EmailVerificationDtos.VerificationResponse;
 import br.com.roboparts.entity.AuditAction;
 import br.com.roboparts.entity.AuditEvent;
 import br.com.roboparts.entity.EmployeeUser;
@@ -26,18 +27,22 @@ public class AuthService {
     private final AuditEventRepository events;
     private final PasswordEncoder passwords;
     private final RegistrationAccessCode accessCode;
+    private final EmailVerificationService verification;
+    private final AccessManagementService management;
 
     public AuthService(EmployeeUserRepository users, AuditEventRepository events, PasswordEncoder passwords,
-            RegistrationAccessCode accessCode) {
+            RegistrationAccessCode accessCode, EmailVerificationService verification, AccessManagementService management) {
         this.users = users;
         this.events = events;
         this.passwords = passwords;
         this.accessCode = accessCode;
+        this.verification = verification;
+        this.management = management;
     }
 
     @Transactional
-    public UserResponse register(RegisterRequest request) {
-        accessCode.verify(request.accessCode());
+    public VerificationResponse register(RegisterRequest request) {
+        management.consume(request.email(), request.accessCode());
         if (users.existsByEmail(request.email())) throw duplicateEmail();
         EmployeeUser user = new EmployeeUser(UUID.randomUUID(), request.name(), request.email(),
                 passwords.encode(request.password()), Instant.now());
@@ -49,7 +54,7 @@ public class AuthService {
             throw exception;
         }
         events.save(new AuditEvent(UUID.randomUUID(), user.getId(), AuditAction.USER_REGISTERED, Instant.now()));
-        return UserResponse.from(user);
+        return verification.request(user.getId());
     }
 
     @Transactional

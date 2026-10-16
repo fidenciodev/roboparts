@@ -6,6 +6,7 @@ import { AuthLayout } from "../components/AuthLayout";
 import { FormField } from "../components/FormField";
 import { useAuth } from "../hooks/useAuth";
 import { ApiError } from "../services/api";
+import { EmailVerificationRequired, MfaRequired } from "../services/authService";
 import { focusFirstInvalid, validateLogin } from "../services/authValidation";
 import { safeReturnPath } from "../routes/ProtectedRoute";
 
@@ -15,13 +16,15 @@ export function LoginPage() {
   const navigate = useNavigate();
   const form = useRef<HTMLFormElement>(null);
   const alert = useRef<HTMLDivElement>(null);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(typeof location.state?.email === "string" ? location.state.email : "");
   const [password, setPassword] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const returnPath = safeReturnPath(location.state?.from);
   const registered = location.state?.registered === true;
+  const emailVerified = location.state?.emailVerified === true;
+  const passwordReset = location.state?.passwordReset === true;
   useEffect(() => { document.title = "RoboParts | Entrar"; }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -38,6 +41,13 @@ export function LoginPage() {
       navigate(returnPath, { replace: true });
     } catch (cause) {
       setPassword("");
+      if (cause instanceof MfaRequired) {
+        navigate("/segundo-fator", { replace: true, state: { from: returnPath, email: email.trim() } }); return;
+      }
+      if (cause instanceof EmailVerificationRequired) {
+        navigate("/confirmar-email", { replace: true, state: { verification: cause.verification, from: returnPath } });
+        return;
+      }
       setError(cause instanceof ApiError ? cause.message : "Não foi possível entrar. Tente novamente.");
       const errors = cause instanceof ApiError ? cause.fields : {};
       setFields(errors);
@@ -51,6 +61,8 @@ export function LoginPage() {
     <h1>Entre no seu espaço.</h1>
     <p className="auth-intro">Use sua conta de funcionário para continuar.</p>
     {registered && <div className="auth-feedback auth-feedback--success" role="status"><CheckCircle2 size={18} aria-hidden="true" /><p>Cadastro concluído. Entre com seu e-mail e senha.</p></div>}
+    {emailVerified && <div className="auth-feedback auth-feedback--success" role="status"><CheckCircle2 size={18} aria-hidden="true" /><p>E-mail confirmado. Entre com sua senha para continuar.</p></div>}
+    {passwordReset && <div className="auth-feedback auth-feedback--success" role="status"><CheckCircle2 size={18} aria-hidden="true" /><p>Senha alterada. Entre com sua nova senha.</p></div>}
     {auth.sessionExpired && <div className="auth-feedback" role="status"><p>Sua sessão expirou. Entre novamente para continuar.</p></div>}
     {(error || auth.error) && <div ref={alert} className="auth-feedback auth-feedback--error" role="alert" tabIndex={-1}><p>{error || auth.error}</p></div>}
     <form ref={form} noValidate onSubmit={(event) => void submit(event)} aria-busy={pending}>
@@ -60,6 +72,7 @@ export function LoginPage() {
         <button type="submit" className="primary-button auth-submit" disabled={pending}>{pending ? <><LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> Entrando…</> : <>Entrar <ArrowRight size={17} aria-hidden="true" /></>}</button>
       </fieldset>
     </form>
+    <p className="auth-switch"><Link to="/esqueci-senha" state={{ email: email.trim(), from: returnPath }}>Esqueci minha senha</Link></p>
     <p className="auth-switch">Ainda não tem uma conta? <Link to="/cadastro" state={{ from: returnPath }}>Cadastrar com código</Link></p>
   </AuthLayout>;
 }

@@ -1,9 +1,20 @@
 import type { RegistrationInput } from "../types/auth";
 
 export function validateLogin(email: string, password: string): Record<string, string> {
-  const errors: Record<string, string> = {};
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) errors.email = "Informe um e-mail válido.";
+  const errors = validateEmail(email);
   if (password.length < 12 || password.length > 128) errors.password = "Informe sua senha de 12 a 128 caracteres.";
+  return errors;
+}
+
+export function validateEmail(email: string): Record<string, string> {
+  return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254
+    ? { email: "Informe um e-mail válido." } : {};
+}
+
+export function validatePasswordReset(email: string, code: string, password: string, confirmation: string): Record<string, string> {
+  const errors = validateLogin(email, password);
+  if (!/^[0-9]{6}$/.test(code)) errors.code = "Informe os 6 dígitos enviados ao seu e-mail.";
+  if (password !== confirmation) errors.confirmation = "A confirmação precisa ser igual à senha.";
   return errors;
 }
 

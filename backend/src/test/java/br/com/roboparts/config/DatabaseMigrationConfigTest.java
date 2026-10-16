@@ -30,6 +30,19 @@ class DatabaseMigrationConfigTest {
     private final Flyway flyway = mock(Flyway.class);
     private final DatabaseMigrationConfig configuration = new DatabaseMigrationConfig();
 
+    @Test void runtimeRoleValidatesPrivilegesAndHistoryWithoutApplyingDdl() {
+        var inspection=installedInspection();when(inspector.inspect()).thenReturn(inspection);
+        configuration.inspectedMigrationStrategy(inspector,new MockEnvironment().withProperty("DB_PASSWORD","test-only").withProperty("app.database.auto-migrate","false")).migrate(flyway);
+        var ordered=inOrder(inspector,flyway);ordered.verify(inspector).inspect();ordered.verify(inspector).validate(inspection);
+        ordered.verify(inspector).validateRuntimeRole();ordered.verify(flyway).validate();verify(flyway,never()).migrate();
+    }
+
+    @Test void excessiveRuntimePrivilegesPreventEvenHistoryValidation() {
+        when(inspector.inspect()).thenReturn(installedInspection());doThrow(new IllegalStateException("excessive privileges")).when(inspector).validateRuntimeRole();
+        var strategy=configuration.inspectedMigrationStrategy(inspector,new MockEnvironment().withProperty("DB_PASSWORD","test-only").withProperty("app.database.auto-migrate","false"));
+        assertThatThrownBy(()->strategy.migrate(flyway)).isInstanceOf(IllegalStateException.class);verifyNoInteractions(flyway);
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"", " ", "\t\n"})

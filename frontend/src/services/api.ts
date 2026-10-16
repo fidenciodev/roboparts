@@ -28,12 +28,24 @@ const messages: Record<string, string> = {
   invalid_credentials: "E-mail ou senha inválidos. Confira os dados e tente novamente.",
   invalid_access_code: "O código de acesso é inválido. Solicite um código válido à sua equipe.",
   email_already_registered: "Este e-mail já está cadastrado. Entre com sua conta.",
+  verification_invalid: "Código inválido, expirado ou sem tentativas disponíveis. Solicite um novo código.",
+  password_reset_invalid: "Código inválido, expirado ou sem tentativas disponíveis. Solicite outro código e confira o e-mail informado.",
+  verification_cooldown: "Aguarde um minuto antes de reenviar o código.",
+  verification_send_limit: "O limite de envios foi atingido. Aguarde uma hora e tente novamente.",
+  email_not_configured: "O envio de e-mails ainda não foi configurado. Sua equipe precisa configurar o Gmail no servidor.",
+  email_delivery_unavailable: "Não foi possível enviar o código. Tente novamente ou avise sua equipe.",
   registration_disabled: "O cadastro está indisponível. Solicite à sua equipe a configuração do código de acesso.",
   validation_error: "Confira os campos indicados e tente novamente.",
   unauthenticated: "Sua sessão expirou. Entre novamente para continuar.",
   access_denied: "Você não tem acesso a esta operação.",
   csrf_invalid: "Não foi possível validar esta solicitação. Tente novamente.",
   rate_limited: "Muitas tentativas em pouco tempo. Aguarde alguns minutos antes de tentar novamente.",
+  account_rate_limited: "Muitas tentativas para esta conta. Aguarde até 15 minutos ou use a recuperação de senha.",
+  mfa_invalid: "Confira sua senha e o código do autenticador. Se já usou esse código, aguarde o próximo ou use um código de recuperação.",
+  mfa_rate_limited: "Muitas tentativas. Aguarde cinco minutos antes de tentar novamente.",
+  mfa_challenge_expired: "A confirmação expirou. Volte ao login e informe seu e-mail e senha novamente.",
+  mfa_already_enabled: "A autenticação em duas etapas já está ativada.",
+  cannot_disable_self: "Você não pode bloquear sua própria conta.",
   service_unavailable: "O serviço está temporariamente indisponível. Tente novamente em instantes.",
   internal_error: "Não foi possível concluir a solicitação. Tente novamente em instantes.",
 };
@@ -42,6 +54,7 @@ const fieldMessages: Record<string, string> = {
   email: "Informe um e-mail válido, com até 254 caracteres.",
   password: "Use uma senha de 12 a 128 caracteres.",
   accessCode: "Confira o código de acesso informado.",
+  code: "Informe o código de confirmação com 6 dígitos.",
 };
 const expiredListeners = new Set<() => void>();
 export function onSessionExpired(listener: () => void) {

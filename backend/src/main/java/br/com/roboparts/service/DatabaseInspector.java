@@ -79,6 +79,17 @@ public class DatabaseInspector {
     }
 
     public record DatabaseIdentity(String name, String serverVersion, int versionNumber) { }
+    public void validateRuntimeRole() {
+        Boolean excessive = jdbc.queryForObject("""
+                SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls
+                  OR has_database_privilege(current_user,current_database(),'CREATE')
+                  OR has_schema_privilege(current_user,'roboparts','CREATE')
+                  OR has_table_privilege(current_user,'roboparts.audit_events','UPDATE')
+                  OR has_table_privilege(current_user,'roboparts.audit_events','DELETE')
+                FROM pg_roles WHERE rolname=current_user
+                """, Boolean.class);
+        if (!Boolean.FALSE.equals(excessive)) throw new IllegalStateException("Use um usuário de banco exclusivo, sem administração, DDL ou edição da auditoria.");
+    }
     public record ExistingObject(String schema, String name) { }
     public record Inspection(DatabaseIdentity identity, List<ExistingObject> objects, boolean historyExists) { }
 }

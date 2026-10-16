@@ -30,7 +30,11 @@ public class DatabaseMigrationConfig {
             // migrate validates existing history (validate-on-migrate=true), accepts
             // pending migrations and creates the configured schema on first use.
             // A separate validate call rejects an application schema that is absent.
-            flyway.migrate();
+            if (environment.getProperty("app.database.auto-migrate", Boolean.class, true)) flyway.migrate();
+            else {
+                inspector.validateRuntimeRole();
+                flyway.validate(); // Runtime role has no DDL privileges; deploy migrations through offline maintenance first.
+            }
         };
     }
 }

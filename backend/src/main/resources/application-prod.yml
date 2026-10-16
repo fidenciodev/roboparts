@@ -1,0 +1,53 @@
+# Activate explicitly with SPRING_PROFILES_ACTIVE=prod after configuring hosting/TLS.
+debug: false
+trace: false
+spring:
+  mvc:
+    log-request-details: false
+  mail:
+    properties:
+      mail.debug: false
+server:
+  # The default expects a TLS reverse proxy on this machine, with port 8080 private.
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  forward-headers-strategy: native
+  tomcat:
+    redirect-context-root: false
+    remoteip:
+      internal-proxies: '127\.0\.0\.1|::1|0:0:0:0:0:0:0:1'
+      protocol-header: X-Forwarded-Proto
+      remote-ip-header: X-Forwarded-For
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:30m}
+      cookie:
+        secure: true
+        http-only: true
+        same-site: lax
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+management:
+  endpoint:
+    health:
+      show-details: never
+app:
+  database:
+    auto-migrate: false
+  security:
+    production: true
+  cors:
+    # No local-development origins are silently accepted in production.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
+logging:
+  level:
+    root: INFO
+    br.com.roboparts: INFO
+    org.springframework: INFO
+    org.springframework.web: WARN
+    org.springframework.security: WARN
+    org.hibernate: WARN
+    org.hibernate.SQL: OFF
+    org.hibernate.orm.jdbc.bind: OFF

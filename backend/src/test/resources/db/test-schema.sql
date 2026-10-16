@@ -71,3 +71,34 @@ CREATE TABLE IF NOT EXISTS roboparts.movements (
  FOREIGN KEY(checklist_id,item_id) REFERENCES roboparts.checklist_items(checklist_id,id)
 );
 CREATE INDEX IF NOT EXISTS movements_checklist_created_idx ON roboparts.movements(checklist_id,created_at,id);
+ALTER TABLE roboparts.users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE IF NOT EXISTS roboparts.email_verifications (
+ id UUID PRIMARY KEY, user_id UUID NOT NULL UNIQUE REFERENCES roboparts.users(id),
+ code_hash VARCHAR(255) NOT NULL, expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+ last_sent_at TIMESTAMP WITH TIME ZONE NOT NULL, attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 5),
+ send_window_at TIMESTAMP WITH TIME ZONE NOT NULL, send_count INTEGER NOT NULL CHECK (send_count BETWEEN 1 AND 5)
+);
+ALTER TABLE roboparts.users ADD COLUMN IF NOT EXISTS password_version BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS roboparts.password_resets (
+ user_id UUID PRIMARY KEY REFERENCES roboparts.users(id), code_hash VARCHAR(255) NOT NULL,
+ expires_at TIMESTAMP WITH TIME ZONE NOT NULL, last_sent_at TIMESTAMP WITH TIME ZONE NOT NULL,
+ attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 5), send_window_at TIMESTAMP WITH TIME ZONE NOT NULL,
+ send_count INTEGER NOT NULL CHECK (send_count BETWEEN 1 AND 5)
+);
+ALTER TABLE roboparts.users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE TABLE IF NOT EXISTS roboparts.team_invitations (
+ id UUID PRIMARY KEY, email VARCHAR(254) NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE,
+ created_by UUID NOT NULL REFERENCES roboparts.users(id), created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+ expires_at TIMESTAMP WITH TIME ZONE NOT NULL, consumed_at TIMESTAMP WITH TIME ZONE, revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE TABLE IF NOT EXISTS roboparts.security_events (
+ id UUID PRIMARY KEY,event_type VARCHAR(40) NOT NULL,account_key VARCHAR(64) NOT NULL,created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE TABLE IF NOT EXISTS roboparts.mfa_credentials (
+ user_id UUID PRIMARY KEY REFERENCES roboparts.users(id),encrypted_secret VARCHAR(512) NOT NULL,enabled BOOLEAN NOT NULL DEFAULT FALSE,
+ last_counter BIGINT NOT NULL DEFAULT -1,enrollment_expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+ failure_window_at TIMESTAMP WITH TIME ZONE NOT NULL,failures INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS roboparts.mfa_recovery_codes (
+ user_id UUID NOT NULL REFERENCES roboparts.users(id),code_hash VARCHAR(64) NOT NULL,used_at TIMESTAMP WITH TIME ZONE,PRIMARY KEY(user_id,code_hash)
+);

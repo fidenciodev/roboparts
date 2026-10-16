@@ -50,8 +50,8 @@ class AuthHttpTest extends BackendHttpTest {
                         .content(registrationBody("  Ana Silva  ", "  " + email.toUpperCase() + "  ",
                                 PASSWORD, ACCESS_CODE)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").isNotEmpty())
-                .andExpect(jsonPath("$.name").value("Ana Silva"))
+                .andExpect(jsonPath("$.verificationId").isNotEmpty())
+                .andExpect(jsonPath("$.code").doesNotExist())
                 .andExpect(jsonPath("$.email").value(email))
                 .andExpect(jsonPath("$.password").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
@@ -65,7 +65,8 @@ class AuthHttpTest extends BackendHttpTest {
         assertThat(passwordEncoder.matches(PASSWORD, hash)).isTrue();
         assertThat(passwordEncoder.matches("an-incorrect-password", hash)).isFalse();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM roboparts.audit_events WHERE user_id = ? "
-                        + "AND action = 'USER_REGISTERED'", Integer.class, UUID.fromString(id(registration))))
+                        + "AND action = 'USER_REGISTERED'", Integer.class, jdbc.queryForObject(
+                                "SELECT id FROM roboparts.users WHERE email=?", UUID.class, email)))
                 .isEqualTo(1);
         // Registration does not grant a session: employees must authenticate explicitly.
         mvc.perform(get("/api/auth/me").session(csrf.session())).andExpect(status().isUnauthorized());
@@ -230,7 +231,7 @@ class AuthHttpTest extends BackendHttpTest {
         login(loggedOut, email, PASSWORD);
         assertThat(jdbc.queryForList("SELECT action FROM roboparts.audit_events WHERE user_id = ?",
                 String.class, UUID.fromString(userId)))
-                .containsExactlyInAnyOrder("USER_REGISTERED", "USER_LOGGED_IN", "USER_LOGGED_OUT", "USER_LOGGED_IN");
+                .containsExactlyInAnyOrder("USER_REGISTERED", "USER_EMAIL_VERIFIED", "USER_LOGGED_IN", "USER_LOGGED_OUT", "USER_LOGGED_IN");
     }
 
     @Test
@@ -244,7 +245,7 @@ class AuthHttpTest extends BackendHttpTest {
                         .param("userId", otherId).param("limit", "20"))
                 .andExpect(status().isOk()).andReturn();
         List<Map<String, Object>> activities = JsonPath.read(response.getResponse().getContentAsString(), "$");
-        assertThat(activities).hasSize(2);
+        assertThat(activities).hasSize(3);
         assertThat(activities).allSatisfy(activity -> {
             assertThat(activity).containsKeys("id", "action", "createdAt");
             assertThat(activity).doesNotContainKeys("password", "passwordHash", "email", "accessCode");
@@ -274,10 +275,18 @@ class AuthHttpTest extends BackendHttpTest {
 
     private MvcResult register(String email) throws Exception {
         CsrfSession csrf = csrf(null);
-        return mvc.perform(post("/api/auth/register").session(csrf.session())
+        MvcResult pending = mvc.perform(post("/api/auth/register").session(csrf.session())
                         .header("X-CSRF-TOKEN", csrf.token()).contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody("Ana Silva", email, PASSWORD, ACCESS_CODE)))
                 .andExpect(status().isCreated()).andReturn();
+        String code = org.mockito.Mockito.mockingDetails(mailer).getInvocations().stream()
+                .filter(i -> i.getMethod().getName().equals("sendCode") && i.getArgument(0).equals(email))
+                .reduce((first, last) -> last).orElseThrow().getArgument(1);
+        String challenge = JsonPath.read(pending.getResponse().getContentAsString(), "$.verificationId");
+        return mvc.perform(post("/api/auth/verify-email").session(csrf.session())
+                .header("X-CSRF-TOKEN", csrf.token()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"verificationId\":\""+challenge+"\",\"code\":\""+code+"\"}"))
+                .andExpect(status().isOk()).andReturn();
     }
 
     private MvcResult login(CsrfSession csrf, String email, String password) throws Exception {

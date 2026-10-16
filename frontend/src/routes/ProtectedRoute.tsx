@@ -18,7 +18,7 @@ export function safeReturnPath(value: unknown): string {
     const decoded = decodeURIComponent(value);
     if (decoded.startsWith("//") || /[\\\u0000-\u0020]/.test(decoded)) return "/";
     const url = new URL(value, "https://roboparts.local");
-    if (url.origin !== "https://roboparts.local" || ["/entrar", "/cadastro"].includes(url.pathname)) return "/";
+    if (url.origin !== "https://roboparts.local" || ["/entrar", "/cadastro", "/confirmar-email", "/esqueci-senha", "/segundo-fator"].includes(url.pathname)) return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch { return "/"; }
 }

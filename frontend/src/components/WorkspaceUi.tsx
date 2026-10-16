@@ -4,7 +4,7 @@ import { Check, ChevronLeft, ChevronRight, LoaderCircle, Pencil, RefreshCw, X } 
 export const formatDate = (value: string) => new Intl.DateTimeFormat("pt-BR",{dateStyle:"short",timeStyle:"short"}).format(new Date(value));
 export const statusLabels: Record<string,string> = { PENDING:"Pendente", IN_PROGRESS:"Em andamento", COMPLETED:"Em uso", RETURNING:"Em devolução", RETURNED:"Devolvido", CANCELLED:"Cancelado" };
 export const actionLabels: Record<string,string> = { USER_REGISTERED:"Cadastro de conta",USER_LOGGED_IN:"Entrada no sistema",USER_LOGGED_OUT:"Saída do sistema",
- ROBOT_CREATED:"Robô cadastrado",ROBOT_UPDATED:"Robô alterado",NODE_CREATED:"Elemento adicionado",NODE_UPDATED:"Elemento alterado",
+ USER_EMAIL_VERIFIED:"E-mail confirmado",USER_PASSWORD_RESET:"Senha recuperada",MFA_ENABLED:"Duas etapas ativadas",MFA_DISABLED:"Duas etapas desativadas",USER_DISABLED:"Acesso bloqueado",USER_ENABLED:"Acesso reativado",INVITATION_CREATED:"Convite criado",INVITATION_REVOKED:"Convite revogado",ROBOT_CREATED:"Robô cadastrado",ROBOT_UPDATED:"Robô alterado",NODE_CREATED:"Elemento adicionado",NODE_UPDATED:"Elemento alterado",
  CHECKLIST_STARTED:"Retirada iniciada",COMPONENT_WITHDRAWN:"Componente retirado",COMPONENT_RETURNED:"Componente devolvido",CHECKLIST_FINALIZED:"Retirada conferida",CHECKLIST_CANCELLED:"Checklist cancelado" };
 export function useAction() {
  const lock=useRef(false);const [busy,setBusy]=useState(false);const [error,setError]=useState<string|null>(null);const [success,setSuccess]=useState<string|null>(null);

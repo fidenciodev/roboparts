@@ -19,6 +19,10 @@ frontend/coverage/
 *.log
 *.tmp
 *.bak
+*.dump
+*.rpb
+*.credential.xml
+*.key
 
 # IDE e sistema operacional
 .idea/

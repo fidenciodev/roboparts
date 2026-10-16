@@ -9,6 +9,7 @@ import { AppRoutes } from "./AppRoutes";
 import { safeReturnPath } from "./ProtectedRoute";
 
 const currentUser = { id: "ab70c719-b047-4f31-97c0-d85280cda031", name: "Ana Silva", email: "ana@example.com" };
+const verification = { verificationId:"8f5d4544-2e9a-44ec-bf5e-ab415da134ad",email:currentUser.email,expiresInSeconds:600,retryAfterSeconds:0 };
 const validStatus = {
   application: "RoboParts", status: "UP", database: { status: "UP", version: "18.3" },
   migrations: { version: "2", description: "Employee authentication" },
@@ -22,7 +23,11 @@ function installApi(overrides: Record<string, ApiHandler> = {}) {
     "/api/auth/me": () => json(currentUser),
     "/api/auth/csrf": () => json({ token: "masked-token", headerName: "X-CSRF-TOKEN" }),
     "/api/auth/login": () => json(currentUser),
-    "/api/auth/register": () => json(currentUser, 201),
+    "/api/auth/register": () => json(verification, 201),
+    "/api/auth/verify-email": () => json(currentUser),
+    "/api/auth/resend-verification": () => json({...verification,retryAfterSeconds:60}),
+    "/api/auth/forgot-password": () => json({ message: "Se o e-mail estiver cadastrado, enviaremos um código." }, 202),
+    "/api/auth/reset-password": () => new Response(null, { status: 204 }),
     "/api/auth/logout": () => new Response(null, { status: 204 }),
     "/api/auth/activities?limit=20": () => json([]),
     "/api/system/status": () => json(validStatus),
@@ -71,6 +76,82 @@ function expectOnlyThemeStored() {
 }
 
 beforeEach(() => invalidateCsrf());
+
+describe("Autenticador e gerenciamento de segurança", () => {
+  it("só abre o espaço privado depois da confirmação do segundo fator", async () => {
+    let resolveFactor!: (response:Response)=>void;
+    const fetchMock=installApi({
+      "/api/auth/me":anonymous,
+      "/api/auth/login":()=>json({mfaRequired:true,expiresInSeconds:300},202),
+      "/api/auth/mfa-login":()=>new Promise<Response>(resolve=>{resolveFactor=resolve;}),
+    });
+    renderApp("/entrar");await screen.findByLabelText("Senha");await fillLogin();
+    await userEvent.click(screen.getByRole("button",{name:"Entrar"}));
+    await screen.findByRole("heading",{name:"Confirme seu acesso."});
+    expect(screen.queryByLabelText("Funcionário conectado")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Código do autenticador"),"123456");
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar acesso"}));
+    expect(screen.getByRole("button",{name:/Confirmando/})).toBeDisabled();
+    expect(screen.queryByRole("heading",{name:"Bem-vindo, Ana Silva."})).not.toBeInTheDocument();
+    await act(async()=>resolveFactor(json(currentUser)));
+    await screen.findByRole("heading",{name:"Bem-vindo, Ana Silva."});
+    expect(fetchMock.mock.calls.filter(([path])=>path==="/api/auth/mfa-login")).toHaveLength(1);
+    expectOnlyThemeStored();
+  });
+  it("aceita código de recuperação e explica quando a etapa de login expirou", async()=>{
+    const fetchMock=installApi({"/api/auth/me":anonymous,"/api/auth/mfa-login":()=>json({code:"mfa_challenge_expired"},400)});
+    renderApp("/segundo-fator");await screen.findByRole("heading",{name:"Confirme seu acesso."});
+    await userEvent.click(screen.getByRole("button",{name:"Usar código de recuperação"}));
+    await userEvent.type(screen.getByLabelText("Código de recuperação"),"aaaa-bbbb-cccc-dddd-eeee-ffff-0000-1111");
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar acesso"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A confirmação expirou");
+    expect(screen.getByLabelText("Código de recuperação")).toHaveValue("");
+    expect(fetchMock.mock.calls.filter(([path])=>path==="/api/auth/mfa-login")).toHaveLength(1);
+  });
+  it("configura o autenticador e mostra códigos de recuperação apenas até confirmar que foram guardados",async()=>{
+    const codes=Array.from({length:8},(_,index)=>`aaaa-bbbb-cccc-dddd-eeee-ffff-0000-000${index}`);
+    const fetchMock=installApi({
+      "/api/security":()=>json({manager:false,mfa:{enabled:false,remainingRecoveryCodes:0}}),
+      "/api/security/mfa/setup":()=>json({secret:"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",uri:"otpauth://totp/RoboParts",expiresAt:"2026-10-16T15:00:00Z"}),
+      "/api/security/mfa/confirm":()=>json({recoveryCodes:codes}),
+    });
+    renderApp("/seguranca");await screen.findByLabelText("Senha atual");
+    expect(screen.queryByRole("heading",{name:/Convites individuais/})).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Senha atual"),"current-password-123");
+    await userEvent.click(screen.getByRole("button",{name:"Configurar autenticador"}));
+    expect(await screen.findByLabelText("Chave de configuração")).toHaveValue("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567");
+    await userEvent.type(screen.getByLabelText("Código do autenticador"),"123456");
+    await userEvent.click(screen.getByRole("button",{name:"Ativar duas etapas"}));
+    expect(await screen.findByLabelText("Seus códigos de recuperação")).toHaveValue(codes.join("\n"));
+    expect(screen.queryByLabelText("Chave de configuração")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button",{name:"Já guardei os códigos"}));
+    expect(screen.queryByLabelText("Seus códigos de recuperação")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Senha atual")).toHaveValue("");
+    expect(fetchMock.mock.calls.some(([path])=>String(path).includes("/employees"))).toBe(false);
+    expectOnlyThemeStored();
+  });
+  it("mostra convites individuais e bloqueio de funcionários somente ao responsável",async()=>{
+    const token="A".repeat(43);let blocked=false;
+    const fetchMock=installApi({
+      "/api/security":()=>json({manager:true,mfa:{enabled:false,remainingRecoveryCodes:0}}),
+      "/api/security/employees":()=>json([{...currentUser,active:true,verified:true},{id:"other-id",name:"Outro funcionário",email:"other@example.com",active:!blocked,verified:true}]),
+      "/api/security/invitations":options=>options.method==="POST"?json({id:"invite-id",email:"new@example.com",token,expiresAt:"2030-01-01T00:00:00Z"},201):json([]),
+      "/api/security/events":()=>json({summary:[],recent:[]}),
+      "/api/security/employees/other-id":()=>{blocked=true;return new Response(null,{status:204});},
+    });
+    renderApp("/seguranca");await screen.findByRole("button",{name:"Sua conta"});
+    expect(screen.getByRole("button",{name:"Sua conta"})).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("E-mail do novo funcionário"),"new@example.com");
+    await userEvent.click(screen.getByRole("button",{name:"Gerar convite"}));
+    expect(await screen.findByLabelText("Código do convite")).toHaveValue(token);
+    await userEvent.click(screen.getByRole("button",{name:"Já copiei o convite"}));
+    expect(screen.queryByLabelText("Código do convite")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button",{name:"Bloquear acesso"}));
+    await screen.findByRole("button",{name:"Reativar acesso"});
+    const update=fetchMock.mock.calls.find(([path])=>path==="/api/security/employees/other-id");
+    expect(JSON.parse(update?.[1].body as string)).toEqual({active:false});expectOnlyThemeStored();
+  });
+});
 
 describe("Sessão e navegação privada", () => {
   it("aguarda a recuperação da sessão antes de exibir páginas privadas", async () => {
@@ -135,7 +216,7 @@ describe("Sessão e navegação privada", () => {
     expect(client.getQueryData(["private", "example"])).toBeUndefined();
   });
 
-  it.each(["https://outside.example", "//outside.example", "/%2foutside.example", "/\\outside.example", "/entrar", "/cadastro", "/%5coutside.example", "/%00outside.example"])(
+  it.each(["https://outside.example", "//outside.example", "/%2foutside.example", "/\\outside.example", "/entrar", "/cadastro", "/esqueci-senha", "/%5coutside.example", "/%00outside.example"])(
     "descarta destinos de retorno inválidos (%s)", (path) => expect(safeReturnPath(path)).toBe("/"),
   );
   it("preserva busca e fragmento de um destino interno válido", () => {
@@ -144,6 +225,82 @@ describe("Sessão e navegação privada", () => {
 });
 
 describe("Formulários de acesso", () => {
+  it("recupera a senha pelo link de login, exige confirmação e preserva o destino original", async () => {
+    const mock = installApi({ "/api/auth/me": anonymous });
+    renderApp("/sistema?local=1#diagnostico");
+    await screen.findByRole("heading", { name: "Entre no seu espaço." });
+    await userEvent.type(screen.getByLabelText("E-mail"), currentUser.email);
+    await userEvent.click(screen.getByRole("link", { name: "Esqueci minha senha" }));
+    await screen.findByRole("heading", { name: "Esqueceu sua senha?" });
+    expect(screen.getByLabelText("E-mail")).toHaveValue(currentUser.email);
+    await userEvent.click(screen.getByRole("button", { name: "Enviar código" }));
+    await screen.findByRole("heading", { name: "Crie uma nova senha." });
+    expect(screen.getByRole("status")).toHaveTextContent("Se o e-mail estiver cadastrado");
+    expect(screen.getByRole("button", { name: /Reenviar em/ })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Código de recuperação"), "012345");
+    await userEvent.type(screen.getByLabelText("Nova senha"), "new-valid-password-123");
+    await userEvent.type(screen.getByLabelText("Confirmar nova senha"), "different-password");
+    await userEvent.click(screen.getByRole("button", { name: "Salvar nova senha" }));
+    expect(screen.getByLabelText("Confirmar nova senha")).toHaveFocus();
+    expect(mock.mock.calls.some(([path]) => path === "/api/auth/reset-password")).toBe(false);
+    await userEvent.clear(screen.getByLabelText("Confirmar nova senha"));
+    await userEvent.type(screen.getByLabelText("Confirmar nova senha"), "new-valid-password-123");
+    await userEvent.click(screen.getByRole("button", { name: "Salvar nova senha" }));
+    await screen.findByRole("heading", { name: "Entre no seu espaço." });
+    expect(screen.getByRole("status")).toHaveTextContent("Senha alterada. Entre com sua nova senha.");
+    expect(screen.getByLabelText("Senha")).toHaveValue("");
+    const resets = mock.mock.calls.filter(([path]) => path === "/api/auth/reset-password");
+    expect(resets).toHaveLength(1);
+    expect(JSON.parse(resets[0][1].body)).toEqual({ email: currentUser.email, code: "012345", password: "new-valid-password-123" });
+    expect(mock.mock.calls.some(([path]) => path === "/api/auth/login")).toBe(false);
+    await userEvent.type(screen.getByLabelText("Senha"), "new-valid-password-123");
+    await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
+    await screen.findByRole("heading", { name: "Uma base conectada." });
+    expect(screen.getByTestId("location")).toHaveTextContent("/sistema?local=1#diagnostico");
+    expectOnlyThemeStored();
+  });
+
+  it("valida o e-mail e impede pedidos duplicados enquanto aguarda o envio", async () => {
+    let resolveRequest!: (response: Response) => void;
+    const mock = installApi({ "/api/auth/me": anonymous,
+      "/api/auth/forgot-password": () => new Promise<Response>(resolve => { resolveRequest = resolve; }),
+    });
+    renderApp("/esqueci-senha");
+    await screen.findByRole("heading", { name: "Esqueceu sua senha?" });
+    await userEvent.click(screen.getByRole("button", { name: "Enviar código" }));
+    expect(screen.getByLabelText("E-mail")).toHaveFocus();
+    expect(mock.mock.calls.some(([path]) => path === "/api/auth/forgot-password")).toBe(false);
+    await userEvent.type(screen.getByLabelText("E-mail"), "missing@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Enviar código" }));
+    expect(screen.getByRole("button", { name: "Enviando…" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Enviando…" }));
+    expect(mock.mock.calls.filter(([path]) => path === "/api/auth/forgot-password")).toHaveLength(1);
+    await act(async () => resolveRequest(json({ message: "generic" }, 202)));
+    expect(await screen.findByRole("status")).toHaveTextContent("Se o e-mail estiver cadastrado");
+    expectOnlyThemeStored();
+  });
+
+  it("código rejeitado mantém o fluxo e limpa o código e as duas senhas", async () => {
+    installApi({ "/api/auth/me": anonymous, "/api/auth/reset-password": () => json({ code: "password_reset_invalid" }, 400) });
+    renderApp("/esqueci-senha");
+    await screen.findByRole("heading", { name: "Esqueceu sua senha?" });
+    await userEvent.type(screen.getByLabelText("E-mail"), currentUser.email);
+    await userEvent.click(screen.getByRole("button", { name: "Enviar código" }));
+    await screen.findByRole("heading", { name: "Crie uma nova senha." });
+    await userEvent.type(screen.getByLabelText("Código de recuperação"), "012345");
+    await userEvent.type(screen.getByLabelText("Nova senha"), "new-valid-password-123");
+    await userEvent.type(screen.getByLabelText("Confirmar nova senha"), "new-valid-password-123");
+    await userEvent.click(screen.getByRole("button", { name: "Salvar nova senha" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Código inválido");
+    expect(screen.getByLabelText("Código de recuperação")).toHaveValue("");
+    expect(screen.getByLabelText("Nova senha")).toHaveValue("");
+    expect(screen.getByLabelText("Confirmar nova senha")).toHaveValue("");
+    expect(screen.getByRole("heading", { name: "Crie uma nova senha." })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Usar outro e-mail" }));
+    expect(screen.getByLabelText("E-mail")).toHaveValue(currentUser.email);
+    expectOnlyThemeStored();
+  });
+
   it("valida o formulário de login, foca o primeiro campo inválido e não chama a API", async () => {
     const fetchMock = installApi({ "/api/auth/me": anonymous });
     renderApp("/entrar");
@@ -185,7 +342,7 @@ describe("Formulários de acesso", () => {
     expect(screen.queryByText("Sua sessão expirou. Entre novamente para continuar.")).not.toBeInTheDocument();
   });
 
-  it("exige confirmação da senha e após o cadastro mostra login sem autenticar automaticamente", async () => {
+  it("exige confirmação da senha e do e-mail antes de permitir o login", async () => {
     const fetchMock = installApi({ "/api/auth/me": anonymous });
     renderApp("/cadastro");
     await screen.findByRole("heading", { name: "Seu acesso começa aqui." });
@@ -201,8 +358,14 @@ describe("Formulários de acesso", () => {
     await userEvent.clear(screen.getByLabelText("Confirmar senha"));
     await userEvent.type(screen.getByLabelText("Confirmar senha"), "valid-password-123");
     await userEvent.click(screen.getByRole("button", { name: "Criar minha conta" }));
+    await screen.findByRole("heading", { name: "Confirme seu e-mail." });
+    expect(screen.queryByLabelText("Senha")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Código de acesso")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Código de confirmação"),"012345");
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar e-mail"}));
     await screen.findByRole("heading", { name: "Entre no seu espaço." });
-    expect(screen.getByRole("status")).toHaveTextContent("Cadastro concluído. Entre com seu e-mail e senha.");
+    expect(screen.getByRole("status")).toHaveTextContent("E-mail confirmado. Entre com sua senha para continuar.");
+    expect(screen.getByLabelText("E-mail")).toHaveValue(currentUser.email);
     const registrations = fetchMock.mock.calls.filter(([path]) => path === "/api/auth/register");
     expect(registrations).toHaveLength(1);
     expect(JSON.parse(registrations[0][1].body)).toEqual({
@@ -210,6 +373,54 @@ describe("Formulários de acesso", () => {
     });
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/auth/login")).toBe(false);
     expectOnlyThemeStored();
+  });
+
+  it("envia contas existentes à confirmação e só autentica depois de verificar o código",async()=>{
+    let verified=false;
+    const mock=installApi({"/api/auth/me":anonymous,"/api/auth/login":()=>verified?json(currentUser):json(verification,202),
+      "/api/auth/verify-email":()=>{verified=true;return json(currentUser);}});
+    renderApp("/sistema?local=1#diagnostico");
+    await screen.findByRole("heading",{name:"Entre no seu espaço."});await fillLogin();
+    await userEvent.click(screen.getByRole("button",{name:"Entrar"}));
+    await screen.findByRole("heading",{name:"Confirme seu e-mail."});
+    expect(screen.queryByLabelText("Funcionário conectado")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Código de confirmação"),"012345");
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar e-mail"}));
+    await screen.findByRole("heading",{name:"Entre no seu espaço."});
+    await userEvent.type(screen.getByLabelText("Senha"),"valid-password-123");
+    await userEvent.click(screen.getByRole("button",{name:"Entrar"}));
+    await screen.findByRole("heading",{name:"Uma base conectada."});
+    expect(screen.getByTestId("location")).toHaveTextContent("/sistema?local=1#diagnostico");
+    expect(mock.mock.calls.filter(([path])=>path==="/api/auth/login")).toHaveLength(2);
+    expectOnlyThemeStored();
+  });
+
+  it("valida seis dígitos, permite corrigir código rejeitado e controla o reenvio",async()=>{
+    const mock=installApi({"/api/auth/me":anonymous,"/api/auth/login":()=>json(verification,202),
+      "/api/auth/verify-email":()=>json({code:"verification_invalid"},400)});
+    renderApp("/entrar");await screen.findByRole("heading",{name:"Entre no seu espaço."});await fillLogin();
+    await userEvent.click(screen.getByRole("button",{name:"Entrar"}));
+    await screen.findByRole("heading",{name:"Confirme seu e-mail."});
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar e-mail"}));
+    expect(screen.getByLabelText("Código de confirmação")).toHaveFocus();
+    expect(mock.mock.calls.some(([path])=>path==="/api/auth/verify-email")).toBe(false);
+    await userEvent.type(screen.getByLabelText("Código de confirmação"),"123456");
+    await userEvent.click(screen.getByRole("button",{name:"Confirmar e-mail"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Código inválido");
+    expect(screen.getByLabelText("Código de confirmação")).toHaveValue("");
+    await userEvent.click(screen.getByRole("button",{name:"Reenviar código"}));
+    expect(await screen.findByRole("status")).toHaveTextContent("Use o código do e-mail mais recente");
+    expect(screen.getByRole("button",{name:/Reenviar em/})).toBeDisabled();
+    expect(mock.mock.calls.filter(([path])=>path==="/api/auth/resend-verification")).toHaveLength(1);
+    expectOnlyThemeStored();
+  });
+
+  it("não tenta confirmar um e-mail sem um desafio iniciado",async()=>{
+    const mock=installApi({"/api/auth/me":anonymous});renderApp("/confirmar-email");
+    await screen.findByRole("heading",{name:"Confirme seu e-mail."});
+    expect(screen.queryByLabelText("Código de confirmação")).not.toBeInTheDocument();
+    expect(mock.mock.calls.map(([path])=>path)).toEqual(["/api/auth/me"]);
+    expect(screen.getByRole("link",{name:"Voltar para o login"})).toHaveAttribute("href","/entrar");
   });
 
   it("exibe código inválido e limpa senha, confirmação e código mantendo nome e e-mail", async () => {

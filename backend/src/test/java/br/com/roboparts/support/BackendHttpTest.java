@@ -1,6 +1,7 @@
 package br.com.roboparts.support;
 
 import br.com.roboparts.service.SystemStatusService;
+import br.com.roboparts.service.VerificationMailer;
 import org.flywaydb.core.Flyway;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,4 +25,6 @@ public abstract class BackendHttpTest {
     // Disabled auto-migrations must never connect to or mutate the user's PostgreSQL.
     @MockitoBean
     protected Flyway flyway;
+    @MockitoBean
+    protected VerificationMailer mailer;
 }

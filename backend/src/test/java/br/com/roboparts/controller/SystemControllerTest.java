@@ -44,6 +44,12 @@ class SystemControllerTest extends BackendHttpTest {
     }
 
     @Test
+    void healthDoesNotRequireSmtp() throws Exception {
+        mvc.perform(get("/actuator/health")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
     void refusesAnonymousAccessToUnimplementedPrivateRoutes() throws Exception {
         mvc.perform(get("/api/robots"))
                 .andExpect(status().isUnauthorized())

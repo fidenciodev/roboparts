@@ -10,10 +10,15 @@ import org.springframework.security.core.userdetails.UserDetails;
 public final class EmployeeCredentials implements UserDetails, CredentialsContainer {
     private final SessionUser user;
     private String password;
+    private final boolean enabled;
 
     public EmployeeCredentials(SessionUser user, String password) {
+        this(user, password, true);
+    }
+    public EmployeeCredentials(SessionUser user, String password, boolean enabled) {
         this.user = user;
         this.password = password;
+        this.enabled = enabled;
     }
     public SessionUser user() { return user; }
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -22,4 +27,5 @@ public final class EmployeeCredentials implements UserDetails, CredentialsContai
     @Override public String getPassword() { return password; }
     @Override public String getUsername() { return user.email(); }
     @Override public void eraseCredentials() { password = null; }
+    @Override public boolean isEnabled() { return enabled; }
 }

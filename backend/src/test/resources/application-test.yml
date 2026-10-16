@@ -14,12 +14,18 @@ spring:
       mode: always
       schema-locations: classpath:db/test-schema.sql
 app:
+  security:
+    encryption-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    managers: manager@example.com
   auth:
+    account-limit:
+      attempts: 1000
     rate-limit:
       requests: 1000
       window-seconds: 60
       capacity: 4096
   registration:
+    require-invitation: false
     access-code: Test-only-invitation-code-2026-10
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173

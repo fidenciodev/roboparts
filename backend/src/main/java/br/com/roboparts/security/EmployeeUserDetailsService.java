@@ -19,6 +19,6 @@ public class EmployeeUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String email) {
         EmployeeUser user = users.findByEmail(email.strip().toLowerCase(Locale.ROOT))
                 .orElseThrow(() -> new UsernameNotFoundException("Credenciais inválidas."));
-        return new EmployeeCredentials(new SessionUser(user.getId(), user.getName(), user.getEmail()), user.getPasswordHash());
+        return new EmployeeCredentials(new SessionUser(user.getId(), user.getName(), user.getEmail(), user.getPasswordVersion()), user.getPasswordHash(), user.isActive());
     }
 }

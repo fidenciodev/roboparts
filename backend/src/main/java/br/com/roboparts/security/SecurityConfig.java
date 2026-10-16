@@ -25,6 +25,7 @@ import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -33,15 +34,28 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository contextRepository,
-            HttpSessionCsrfTokenRepository csrfTokens, AuthRateLimiter limiter) throws Exception {
+            HttpSessionCsrfTokenRepository csrfTokens, AuthRateLimiter limiter,
+            br.com.roboparts.repository.EmployeeUserRepository users,
+            @Value("${app.security.production:false}") boolean production) throws Exception {
+        if (production) {
+            http.redirectToHttps(redirect -> { });
+            http.headers(headers -> headers
+                    .httpStrictTransportSecurity(hsts -> hsts.maxAgeInSeconds(31536000).includeSubDomains(false))
+                    .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"))
+                    .referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER)));
+        }
         return http.cors(cors -> { })
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokens)
                         .csrfTokenRequestHandler(new XorCsrfTokenRequestAttributeHandler()))
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contextRepository))
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health", "/swagger-ui.html",
-                                "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**")
+                                .access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(!production))
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login",
+                                "/api/auth/verify-email", "/api/auth/resend-verification",
+                                "/api/auth/forgot-password", "/api/auth/reset-password", "/api/auth/mfa-login").permitAll()
+                        .requestMatchers("/api/security", "/api/security/**").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.GET, "/api/auth/me", "/api/auth/activities", "/api/system/status").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.GET, "/api/robots", "/api/robots/**", "/api/checklists", "/api/checklists/**",
@@ -53,6 +67,7 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .requestCache(cache -> cache.disable())
                 .addFilterBefore(new AuthRateLimitFilter(limiter), CsrfFilter.class)
+                .addFilterAfter(new PasswordVersionFilter(users), org.springframework.security.web.context.SecurityContextHolderFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> SecurityErrorResponse.write(response,
                                 401, "unauthenticated", "Acesso não autorizado", "Entre na sua conta para continuar."))

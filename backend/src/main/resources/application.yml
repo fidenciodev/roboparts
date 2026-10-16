@@ -1,6 +1,20 @@
 spring:
   application:
     name: roboparts
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+      mail.smtp.ssl.checkserveridentity: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+      mail.debug: false
   jackson:
     deserialization:
       accept-float-as-int: false
@@ -51,6 +65,10 @@ server:
         same-site: ${SESSION_COOKIE_SAME_SITE:lax}
         secure: ${SESSION_COOKIE_SECURE:false}
 management:
+  health:
+    # Delivery is checked when issuing a code; general health must not contact Gmail.
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -64,9 +82,22 @@ springdoc:
   swagger-ui:
     enabled: ${API_DOCS_ENABLED:true}
 app:
+  database:
+    auto-migrate: ${DB_AUTO_MIGRATE:true}
+  security:
+    encryption-key: ${SECURITY_ENCRYPTION_KEY:}
+    key-file: ${SECURITY_KEY_FILE:${user.home}/.roboparts/security.key}
+    managers: ${SECURITY_MANAGERS:}
+  email:
+    from: ${MAIL_FROM:${MAIL_USERNAME:}}
   registration:
     access-code: ${REGISTRATION_ACCESS_CODE:}
+    require-invitation: ${REGISTRATION_REQUIRE_INVITATION:true}
   auth:
+    account-limit:
+      attempts: ${AUTH_ACCOUNT_MAX_ATTEMPTS:5}
+      seconds: ${AUTH_ACCOUNT_WINDOW_SECONDS:900}
+      capacity: ${AUTH_ACCOUNT_CAPACITY:4096}
     rate-limit:
       requests: ${AUTH_RATE_LIMIT_REQUESTS:20}
       window-seconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:60}

@@ -43,6 +43,15 @@ class AuthRateLimitFilterTest {
         verify(chain, times(1)).doFilter(any(), any());
     }
 
+    @Test void verificationAndResendShareTheLoginRateLimit() throws Exception {
+        AuthRateLimitFilter filter=new AuthRateLimitFilter(new AuthRateLimiter(1,Duration.ofMinutes(1),10));
+        FilterChain chain=mock(FilterChain.class);
+        filter.doFilter(request("POST","/api/auth/verify-email","192.0.2.9"),new MockHttpServletResponse(),chain);
+        var blocked=new MockHttpServletResponse();
+        filter.doFilter(request("POST","/api/auth/resend-verification","192.0.2.9"),blocked,chain);
+        assertThat(blocked.getStatus()).isEqualTo(429);verify(chain,times(1)).doFilter(any(),any());
+    }
+
     @Test
     void identityCsrfAndLogoutDoNotConsumeTheAuthenticationLimit() throws Exception {
         AuthRateLimiter limiter = new AuthRateLimiter(1, Duration.ofMinutes(1), 10);
@@ -53,6 +62,16 @@ class AuthRateLimitFilterTest {
         filter.doFilter(request("POST", "/api/auth/logout", "192.0.2.1"), new MockHttpServletResponse(), chain);
         assertThat(limiter.trackedClientCount()).isZero();
         verify(chain, times(3)).doFilter(any(), any());
+    }
+
+    @Test void recoveryAndResetShareTheAuthenticationRateLimit() throws Exception {
+        AuthRateLimitFilter filter = new AuthRateLimitFilter(new AuthRateLimiter(1, Duration.ofMinutes(1), 10));
+        FilterChain chain = mock(FilterChain.class);
+        filter.doFilter(request("POST", "/api/auth/forgot-password", "192.0.2.10"), new MockHttpServletResponse(), chain);
+        var blocked = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/auth/reset-password", "192.0.2.10"), blocked, chain);
+        assertThat(blocked.getStatus()).isEqualTo(429);
+        verify(chain, times(1)).doFilter(any(), any());
     }
 
     private MockHttpServletRequest request(String method, String path, String address) {

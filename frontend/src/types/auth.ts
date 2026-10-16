@@ -11,6 +11,13 @@ export interface RegistrationInput {
   accessCode: string;
 }
 
+export interface EmailVerification {
+  verificationId: string;
+  email: string;
+  expiresInSeconds: number;
+  retryAfterSeconds: number;
+}
+
 export interface UserActivity {
   id: string;
   action: string;

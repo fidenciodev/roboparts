@@ -2,6 +2,18 @@
 
 Todas as telas de trabalho exigem uma conta de funcionário. O cadastro exige o código interno configurado no servidor; não há administrador nem diferenças de permissão entre os funcionários.
 
+Após o cadastro, confirme o código de 6 dígitos recebido no e-mail para liberar o login. O código vale por 10 minutos e permite até 5 tentativas. **Reenviar código** fica disponível depois de 60 segundos e substitui o código anterior. Há limite de 5 envios por conta por hora. A confirmação não faz login automaticamente: em seguida, entre com a senha da sua conta.
+
+Contas existentes também precisam confirmar o endereço no próximo login. Nesse caso, o código é enviado somente depois de a senha correta ser informada. O código de e-mail é diferente do código interno de cadastro. A confirmação registra **E-mail confirmado** no histórico, sem guardar o código em texto aberto. A configuração do Gmail remetente está descrita no README; uma configuração ausente ou falha de envio não libera contas automaticamente.
+
+## Recuperar uma senha
+
+Na tela de login, clique em **Esqueci minha senha** e informe o e-mail da sua conta. A resposta é igual para todos os endereços: se estiver cadastrado, o sistema envia um código de recuperação. Confira a caixa de entrada e o spam; aguarde 60 segundos para pedir outro código.
+
+Digite os 6 números recebidos e a nova senha duas vezes, com 12 a 128 caracteres. O código vale por 10 minutos e até 5 tentativas. Use o mais recente, pois um reenvio invalida o anterior. Há limite de 5 envios por conta por hora. Códigos de cadastro e de recuperação têm finalidades separadas.
+
+Depois de salvar, entre com a nova senha. As sessões antigas perdem o acesso na próxima requisição, e um aviso de alteração é enviado ao seu e-mail. A recuperação também confirma o e-mail caso a conta ainda não estivesse confirmada.
+
 ## Preparar uma retirada
 
 1. Em **Robôs e componentes**, cadastre o robô com nome e descrição.
@@ -70,6 +82,7 @@ Identidades vêm da sessão no backend. Movimento, atualização e auditoria per
 
 ```mermaid
 erDiagram
+    USERS ||--o| EMAIL_VERIFICATIONS : confirma
     USERS ||--o{ AUDIT_EVENTS : registra
     USERS ||--o{ CHECKLISTS : inicia
     ROBOTS ||--o{ COMPONENT_NODES : organiza
@@ -88,3 +101,5 @@ Os testes automatizados usam H2 no backend e uma API simulada no frontend. Eles 
 Depois de configurar a senha localmente, execute a inspeção de leitura descrita no README e inicie o backend. A inspeção prévia ao Flyway verifica nome, versão e objetos existentes antes de aplicar V1/V2/V3. Os testes PostgreSQL opcionais continuam somente leitura e exigem que o schema já tenha sido migrado.
 
 O ambiente de ferramentas não disponibilizou navegador para inspeção visual. Conferência em computador, celular/tablet e instalação PWA permanecem verificações manuais. O PWA guarda apenas a interface pública; cadastro, login, consultas e alterações exigem conexão com a API.
+
+A V4 de confirmação de e-mail foi verificada em H2, incluindo a preservação das contas existentes. O fluxo HTTP usa um remetente simulado nos testes; nenhum e-mail real é enviado por esses testes. A aplicação da V4 no PostgreSQL e o recebimento de códigos reais dependem de reiniciar o backend e configurar a conta Gmail localmente.

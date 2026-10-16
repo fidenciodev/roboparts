@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   UserRound,
+  ShieldCheck,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { useTheme } from "../hooks/useTheme";
@@ -34,6 +35,7 @@ export function AppLayout() {
         : location.pathname.startsWith("/robos") ? "Robôs e componentes"
         : location.pathname.startsWith("/checklists") ? "Retiradas e devoluções"
         : location.pathname === "/historico" ? "Histórico da equipe"
+        : location.pathname === "/seguranca" ? "Segurança"
         : "Página não encontrada";
 
   useEffect(() => {
@@ -104,6 +106,7 @@ export function AppLayout() {
             <NavLink to="/robos" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><Bot size={19}/><span>Robôs e componentes</span></NavLink>
             <NavLink to="/checklists" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><ClipboardCheck size={19}/><span>Retiradas e devoluções</span></NavLink>
             <NavLink to="/historico" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><History size={19}/><span>Histórico da equipe</span></NavLink>
+            <NavLink to="/seguranca" className={({isActive}) => `nav-link ${isActive?"nav-link--active":""}`}><ShieldCheck size={19}/><span>Segurança</span></NavLink>
           </nav>
         </div>
         <div className="account-panel" aria-label="Funcionário conectado">

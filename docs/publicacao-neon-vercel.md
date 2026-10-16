@@ -61,7 +61,9 @@ valida a identidade do RoboParts e o histórico Flyway, e então:
   participação em outros roles. Uma conta existente privilegiada é recusada.
   Auditoria e movimentações continuam sem UPDATE/DELETE; metadados são somente
   para leitura. O backend verifica essas restrições antes de iniciar.
-- Define uma senha aleatória exclusiva usando SCRAM, verifica o acesso direto e
+- Envia uma senha aleatória exclusiva pela conexão TLS verificada, deixando o
+  PostgreSQL armazená-la em SCRAM (o Neon não aceita senhas já codificadas).
+  Verifica o acesso direto e
   pelo pooler, e armazena a senha do aplicativo com DPAPI na pasta privada.
 - Preserva uma cópia protegida da chave de criptografia original, para que a
   autenticação em duas etapas dos dados copiados continue funcionando.
@@ -69,6 +71,10 @@ valida a identidade do RoboParts e o histórico Flyway, e então:
 A senha de `roboparts_owner` não é salva. O assistente recusa uma segunda
 configuração já registrada, para não trocar inadvertidamente uma senha em uso.
 Instalar o acesso do Neon não muda o banco utilizado pelo sistema local.
+
+Se falhar, o assistente mostra somente a etapa, a categoria e o SQLState.
+Esse diagnóstico também fica em `%LOCALAPPDATA%\RoboParts\neon-preparation-status.txt`;
+não contém mensagens de exceção, conexão, senha nem dados de usuários.
 
 ## 4. Configurar a Vercel
 

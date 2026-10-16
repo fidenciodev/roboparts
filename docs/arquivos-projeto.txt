@@ -123,6 +123,7 @@ backend/src/test/java/br/com/roboparts/PostgreSqlIT.java
 backend/src/test/java/br/com/roboparts/security/AuthRateLimiterTest.java
 backend/src/test/java/br/com/roboparts/security/AuthRateLimitFilterTest.java
 backend/src/test/java/br/com/roboparts/security/BackupCryptoTest.java
+backend/src/test/java/br/com/roboparts/security/CloudDatabaseMaintenanceTest.java
 backend/src/test/java/br/com/roboparts/security/JdbcAttemptWindowStoreTest.java
 backend/src/test/java/br/com/roboparts/security/RegistrationAccessCodeTest.java
 backend/src/test/java/br/com/roboparts/security/SecurityPrimitivesTest.java

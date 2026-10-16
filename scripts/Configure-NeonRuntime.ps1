@@ -7,7 +7,9 @@ $private=Get-RoboPartsPrivateDirectory
 $project=Split-Path -Parent $PSScriptRoot
 $jar=Join-Path $project 'backend\target\roboparts-vercel.jar'
 $target=$null;$inputSecret=$null;$appSecret=$null;$keySecret=$null;$environment=@{}
+$diagnosticPath=Join-Path $private 'neon-preparation-status.txt'
 try {
+    if(Test-Path -LiteralPath $diagnosticPath){Remove-Item -LiteralPath $diagnosticPath -Force}
     if(-not(Test-Path -LiteralPath $jar)){throw 'Gere o pacote cloud do backend antes de continuar.'}
     $settingsPath=Join-Path $private 'neon-runtime-settings.json'
     if(Test-Path -LiteralPath $settingsPath){throw 'O usuario de publicacao ja foi configurado; nao e necessario trocar sua senha.'}
@@ -32,7 +34,8 @@ try {
     $jdbcOptions=':5432/roboparts?sslmode=verify-full&sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory&channelBinding=require&connectTimeout=20'
     $environment=@{DB_URL=('jdbc:postgresql://'+$target.HostName+$jdbcOptions);
         ROBOPARTS_RUNTIME_DB_URL=('jdbc:postgresql://'+($labels -join '.')+$jdbcOptions);
-        DB_USERNAME=$target.RoleName;DB_PASSWORD=$target.Password;ROBOPARTS_APP_PASSWORD=$appPassword}
+        DB_USERNAME=$target.RoleName;DB_PASSWORD=$target.Password;ROBOPARTS_APP_PASSWORD=$appPassword;
+        ROBOPARTS_PREPARATION_DIAGNOSTIC=$diagnosticPath}
     Write-Host 'Preparando sessoes compartilhadas, limites de tentativas e usuario restrito...'
     Invoke-RoboPartsPrivateProcess -File (Get-Command java.exe).Source -Arguments @('-Dloader.main=br.com.roboparts.security.CloudDatabaseMaintenance','-cp',$jar,'org.springframework.boot.loader.launch.PropertiesLauncher') -Environment $environment
     Save-RoboPartsSecret -Name 'neon-app-database' -Secret $appSecret
@@ -46,7 +49,16 @@ try {
     Write-Host 'A proxima etapa e vincular o projeto na Vercel e configurar as variaveis de producao.'
 } catch {
     Write-Host 'A preparacao nao foi concluida. Confira a conexao direta, copia anterior e permissoes no Neon.' -ForegroundColor Red
-    Write-Host 'Detalhes e credenciais foram omitidos. O banco local nao foi alterado.'
+    if(Test-Path -LiteralPath $diagnosticPath) {
+        $diagnostic=Get-Content -LiteralPath $diagnosticPath -Raw
+        if($diagnostic -cmatch '\Astage=([A-Z_]+)\ncategory=(SUCCESS|VALIDATION|TLS|NETWORK|SQL)\nsqlState=(NONE|[A-Z0-9]{5})\n\z') {
+            Write-Host ('Diagnostico seguro: etapa={0}; tipo={1}; SQLState={2}.' -f $Matches[1],$Matches[2],$Matches[3])
+            if($Matches[2]-eq 'TLS'){Write-Host 'Confira a data do Windows e os certificados do Java.'}
+            elseif($Matches[3]-eq '28P01'){Write-Host 'A autenticacao foi recusada. Copie novamente a conexao direta no Neon.'}
+            elseif($Matches[3]-eq '42501'){Write-Host 'O Neon recusou uma permissao. Use o usuario proprietario da copia.'}
+        }
+    }
+    Write-Host 'Senhas e mensagens internas foram omitidas. O banco local nao foi alterado.'
     exit 1
 } finally {
     $environment.Clear();$appPassword=$null

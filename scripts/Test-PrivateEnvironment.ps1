@@ -28,7 +28,13 @@ try {
         [Environment]::CurrentDirectory=Join-Path $env:windir 'System32'
         Invoke-RoboPartsPrivateProcess -File (Get-Command powershell.exe).Source -Arguments @('-NoProfile','-Command','if([Environment]::CurrentDirectory -ne $env:ROBOPARTS_TEST_DIRECTORY){exit 1}') -Environment @{ROBOPARTS_TEST_DIRECTORY=$PSScriptRoot}
     } finally {[Environment]::CurrentDirectory=$previousDirectory}
+    $previousTestVariable=[Environment]::GetEnvironmentVariable('ROBOPARTS_TEST_REMOVED')
+    try {
+        [Environment]::SetEnvironmentVariable('ROBOPARTS_TEST_REMOVED','synthetic-fixture')
+        Invoke-RoboPartsPrivateProcess -File (Get-Command powershell.exe).Source -Arguments @('-NoProfile','-Command','if(Test-Path Env:\ROBOPARTS_TEST_REMOVED){exit 1}') -Environment @{ROBOPARTS_TEST_REMOVED=$null}
+    } finally {[Environment]::SetEnvironmentVariable('ROBOPARTS_TEST_REMOVED',$previousTestVariable)}
     Write-Output 'PASS: private DACL, unchanged owner, repeated setup, inherited file permissions, DPAPI round trip and process directory independent of System32.'
+    Write-Output 'PASS: null overrides remove inherited process environment variables.'
 } finally {
     if($null -ne $secret){$secret.Dispose()}
     if($null -ne $restored){$restored.Dispose()}

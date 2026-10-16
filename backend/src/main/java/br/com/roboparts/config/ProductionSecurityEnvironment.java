@@ -17,7 +17,22 @@ public class ProductionSecurityEnvironment implements EnvironmentPostProcessor, 
     @Override public int getOrder() { return Ordered.LOWEST_PRECEDENCE; }
 
     @Override public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+        if (Arrays.asList(environment.getActiveProfiles()).contains("vercel") &&
+                !Arrays.asList(environment.getActiveProfiles()).contains("prod")) fail("spring.profiles.active (prod,vercel)");
         if (!Arrays.asList(environment.getActiveProfiles()).contains("prod")) return;
+        if (Arrays.asList(environment.getActiveProfiles()).contains("vercel")) {
+            if ("preview".equalsIgnoreCase(environment.getProperty("VERCEL_ENV"))) fail("VERCEL_ENV (banco de demonstracao reservado a production)");
+            // Use platform metadata, never a request Host/X-Forwarded-Host header.
+            // An explicit APP_PUBLIC_URL still takes precedence through the profile.
+            if (environment.getProperty("app.cors.allowed-origins", "").isBlank()
+                    && "1".equals(environment.getProperty("VERCEL"))) {
+                String domain=environment.getProperty("VERCEL_PROJECT_PRODUCTION_URL", "");
+                if(domain.length()>253 || !domain.matches("[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]")
+                        || URI.create("https://"+domain).getHost()==null) fail("VERCEL_PROJECT_PRODUCTION_URL");
+                environment.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource(
+                        "vercelCanonicalOrigin", java.util.Map.of("app.cors.allowed-origins","https://"+domain)));
+            }
+        }
         validate(environment);
     }
 

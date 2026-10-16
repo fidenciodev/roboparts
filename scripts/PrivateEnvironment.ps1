@@ -57,7 +57,10 @@ function Invoke-RoboPartsPrivateProcess {
     $info.Arguments = ($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true; $info.RedirectStandardInput = $true
-    foreach ($key in $Environment.Keys) { $info.EnvironmentVariables[$key] = $Environment[$key] }
+    foreach ($key in $Environment.Keys) {
+        if ($null -eq $Environment[$key]) { $info.EnvironmentVariables.Remove($key) }
+        else { $info.EnvironmentVariables[$key] = $Environment[$key] }
+    }
     $process = [Diagnostics.Process]::new(); $process.StartInfo = $info
     try {
         [void]$process.Start()

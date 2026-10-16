@@ -1,0 +1,15 @@
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY pom.xml ./
+RUN mvn -B -q -Pcloud dependency:go-offline
+COPY src ./src
+RUN mvn -B -q -Pcloud -DskipTests package
+
+FROM eclipse-temurin:21-jre-jammy
+RUN groupadd --gid 10001 roboparts && useradd --uid 10001 --gid roboparts --no-create-home roboparts
+WORKDIR /app
+COPY --from=build --chown=roboparts:roboparts /build/target/roboparts-vercel.jar /app/app.jar
+ENV SPRING_PROFILES_ACTIVE=prod,vercel PORT=8080 JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
+USER roboparts
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -11,13 +11,22 @@ public final class AuthRateLimiter {
     private final int requests;
     private final long windowMillis;
     private final int capacity;
+    private final AttemptWindowStore shared;
     private final Map<String, Window> windows = new HashMap<>();
 
     public AuthRateLimiter(int requests, Duration window, int capacity) {
-        this(Clock.systemUTC(), requests, window, capacity);
+        this(Clock.systemUTC(), requests, window, capacity, null);
+    }
+
+    public AuthRateLimiter(int requests, Duration window, int capacity, AttemptWindowStore shared) {
+        this(Clock.systemUTC(), requests, window, capacity, shared);
     }
 
     AuthRateLimiter(Clock clock, int requests, Duration window, int capacity) {
+        this(clock,requests,window,capacity,null);
+    }
+
+    private AuthRateLimiter(Clock clock, int requests, Duration window, int capacity, AttemptWindowStore shared) {
         if (requests < 1 || requests > 10000 || window.isNegative() || window.toMillis() < 1
                 || window.compareTo(Duration.ofHours(1)) > 0 || capacity < 1 || capacity > 100000) {
             throw new IllegalArgumentException("Configuração inválida do limite de autenticação.");
@@ -26,9 +35,14 @@ public final class AuthRateLimiter {
         this.requests = requests;
         this.windowMillis = window.toMillis();
         this.capacity = capacity;
+        this.shared = shared;
     }
 
     public synchronized Decision accept(String clientAddress) {
+        if (shared != null) {
+            var result=shared.acquire("ip",LoginAttemptLimiter.key(clientAddress),requests,windowMillis,capacity);
+            return new Decision(result.allowed(),result.retryAfterSeconds());
+        }
         long now = clock.millis();
         windows.entrySet().removeIf(entry -> entry.getValue().expiresAt <= now);
         Window window = windows.get(clientAddress);

@@ -114,8 +114,9 @@ public class SecurityConfig {
     @Bean
     AuthRateLimiter authRateLimiter(@Value("${app.auth.rate-limit.requests:20}") int requests,
             @Value("${app.auth.rate-limit.window-seconds:60}") int windowSeconds,
-            @Value("${app.auth.rate-limit.capacity:4096}") int capacity) {
-        return new AuthRateLimiter(requests, Duration.ofSeconds(windowSeconds), capacity);
+            @Value("${app.auth.rate-limit.capacity:4096}") int capacity,
+            org.springframework.beans.factory.ObjectProvider<AttemptWindowStore> stores) {
+        return new AuthRateLimiter(requests, Duration.ofSeconds(windowSeconds), capacity, stores.getIfAvailable());
     }
 
     @Bean

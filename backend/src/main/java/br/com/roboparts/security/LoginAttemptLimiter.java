@@ -13,15 +13,29 @@ public class LoginAttemptLimiter {
     private final Clock clock;
     private final int attempts, capacity;
     private final long windowMillis;
+    private final AttemptWindowStore shared;
     private final Map<String, Window> windows = new HashMap<>();
+    @org.springframework.beans.factory.annotation.Autowired
     public LoginAttemptLimiter(Clock clock, @Value("${app.auth.account-limit.attempts:5}") int attempts,
             @Value("${app.auth.account-limit.seconds:900}") int seconds,
-            @Value("${app.auth.account-limit.capacity:4096}") int capacity) {
+            @Value("${app.auth.account-limit.capacity:4096}") int capacity,
+            org.springframework.beans.factory.ObjectProvider<AttemptWindowStore> stores) {
+        this(clock,attempts,seconds,capacity,stores.getIfAvailable());
+    }
+    public LoginAttemptLimiter(Clock clock,int attempts,int seconds,int capacity) {
+        this(clock,attempts,seconds,capacity,(AttemptWindowStore)null);
+    }
+    public LoginAttemptLimiter(Clock clock,int attempts,int seconds,int capacity,AttemptWindowStore shared) {
         if (attempts < 1 || attempts > 10000 || seconds < 1 || seconds > 3600 || capacity < 1 || capacity > 100000)
             throw new IllegalArgumentException("Configuração inválida do limite por conta.");
         this.clock = clock; this.attempts = attempts; this.capacity = capacity; this.windowMillis = seconds * 1000L;
+        this.shared = shared;
     }
     public synchronized Ticket acquire(String email) {
+        if(shared!=null) {
+            String hash=key(email);var result=shared.acquire("account",hash,attempts,windowMillis,capacity);
+            return new Ticket(hash,result.generation(),result.allowed(),result.retryAfterSeconds());
+        }
         long now = clock.millis();
         windows.entrySet().removeIf(entry -> entry.getValue().expires <= now);
         String key = key(email);
@@ -35,10 +49,11 @@ public class LoginAttemptLimiter {
         return new Ticket(key, window.generation, true, 0);
     }
     public synchronized void success(Ticket ticket) {
+        if(shared!=null){shared.success("account",ticket.key,ticket.generation);return;}
         Window current = windows.get(ticket.key);
         if (current != null && current.generation.equals(ticket.generation)) windows.remove(ticket.key);
     }
-    private static String key(String email) {
+    static String key(String email) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(email.strip().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))); }
         catch (java.security.NoSuchAlgorithmException exception) { throw new IllegalStateException("SHA-256 indisponível."); }

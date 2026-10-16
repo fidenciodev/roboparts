@@ -1,0 +1,20 @@
+# Always use together with prod. Secrets are provided only as runtime environment variables.
+server:
+  address: 0.0.0.0
+  port: ${PORT:8080}
+  tomcat:
+    remoteip:
+      # Only the private bridge/loopback can provide forwarded headers. Vercel
+      # owns public ingress and overwrites X-Forwarded-For to prevent spoofing.
+      internal-proxies: '127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|::1|0:0:0:0:0:0:0:1'
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 0
+      idle-timeout: 60000
+      max-lifetime: 240000
+      connection-timeout: 20000
+app:
+  cors:
+    allowed-origins: ${APP_PUBLIC_URL:}

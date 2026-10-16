@@ -42,6 +42,37 @@ class ProductionSecurityEnvironmentTest {
         assertThat(env.getProperty("server.servlet.session.cookie.secure")).isEqualTo("false");
     }
 
+    @Test void vercelProfileRequiresProductionAndAcceptsItsPrivateProxyDefaults() throws Exception {
+        var env=configured();env.setActiveProfiles("vercel");
+        assertThatThrownBy(()->new ProductionSecurityEnvironment().postProcessEnvironment(env,new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("prod,vercel");
+        env.setActiveProfiles("prod","vercel");
+        for(var source:new YamlPropertySourceLoader().load("vercel",new ClassPathResource("application-vercel.yml")))
+            env.getPropertySources().addFirst(source);
+        env.withProperty("APP_PUBLIC_URL","https://roboparts.example");
+        new ProductionSecurityEnvironment().postProcessEnvironment(env,new SpringApplication());
+        String proxies=env.getProperty("server.tomcat.remoteip.internal-proxies");
+        assertThat(java.util.regex.Pattern.matches(proxies,"10.2.3.4")).isTrue();
+        assertThat(java.util.regex.Pattern.matches(proxies,"198.51.100.1")).isFalse();
+    }
+
+    @Test void vercelCanUseOnlyTheCanonicalPlatformDomainAndRejectsProductionSecretsInPreview() throws Exception {
+        var env=configured();env.setActiveProfiles("prod","vercel");
+        env.withProperty("app.cors.allowed-origins","").withProperty("VERCEL","1")
+                .withProperty("VERCEL_PROJECT_PRODUCTION_URL","demo.vercel.app");
+        new ProductionSecurityEnvironment().postProcessEnvironment(env,new SpringApplication());
+        assertThat(env.getProperty("app.cors.allowed-origins")).isEqualTo("https://demo.vercel.app");
+        env.withProperty("VERCEL_ENV","preview");
+        assertThatThrownBy(()->new ProductionSecurityEnvironment().postProcessEnvironment(env,new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("VERCEL_ENV");
+        var invalid=configured();invalid.setActiveProfiles("prod","vercel");
+        invalid.withProperty("app.cors.allowed-origins","").withProperty("VERCEL","1")
+                .withProperty("VERCEL_PROJECT_PRODUCTION_URL","private-invalid.example/path");
+        assertThatThrownBy(()->new ProductionSecurityEnvironment().postProcessEnvironment(invalid,new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("VERCEL_PROJECT_PRODUCTION_URL")
+                .hasMessageNotContaining("private-invalid");
+    }
+
     @ParameterizedTest @MethodSource("unsafeSettings")
     void rejectsUnsafeOverridesWithoutPrintingTheirValues(String key, String value) throws Exception {
         var env = configured().withProperty(key, value);

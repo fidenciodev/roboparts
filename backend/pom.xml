@@ -14,7 +14,7 @@
   <description>Controle interno de retirada de robôs e componentes</description>
   <properties>
     <java.version>21</java.version>
-    <springdoc.version>3.1.1</springdoc.version>
+    <springdoc.version>3.2.0</springdoc.version>
   </properties>
   <dependencies>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
